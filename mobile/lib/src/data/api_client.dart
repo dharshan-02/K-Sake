@@ -109,10 +109,11 @@ class ApiClient {
     final body = jsonDecode(response.body) as Map<String, dynamic>;
     final token = body['accessToken'] as String;
     final parts = token.split('.');
-    if (parts.length != 3)
+    if (parts.length != 3) {
       throw const FormatException(
         'The server returned an invalid access token.',
       );
+    }
     final claims = jsonDecode(
       utf8.decode(base64Url.decode(base64Url.normalize(parts[1]))),
     ) as Map<String, dynamic>;
@@ -167,8 +168,9 @@ class ApiClient {
           'ciphertext': _encode([...box.cipherText, ...box.mac.bytes]),
         }),
       );
-      if (response.statusCode < 200 || response.statusCode >= 300)
+      if (response.statusCode < 200 || response.statusCode >= 300) {
         throw Exception('Recovery setup could not be saved.');
+      }
       return code;
     } catch (_) {
       await _storage.delete(key: 'pending_recovery_code_v1');
@@ -185,23 +187,26 @@ class ApiClient {
     final token = await _storage.read(key: 'account_access_token');
     if (token == null) throw StateError('Sign in before restoring your vault.');
     final codeBytes = base64Url.decode(base64Url.normalize(code.trim()));
-    if (codeBytes.length != 32)
+    if (codeBytes.length != 32) {
       throw const FormatException(
         'Enter the complete 43-character recovery code.',
       );
+    }
     final uri = await _uri('keys/recovery');
     final response = await _client.get(
       uri,
       headers: {'authorization': 'Bearer $token'},
     );
-    if (response.statusCode < 200 || response.statusCode >= 300)
+    if (response.statusCode < 200 || response.statusCode >= 300) {
       throw Exception('No recovery code is set for this account.');
+    }
     final envelope = jsonDecode(response.body) as Map<String, dynamic>;
     final combined = base64Url.decode(
       base64Url.normalize(envelope['ciphertext'] as String),
     );
-    if (combined.length != 48)
+    if (combined.length != 48) {
       throw const FormatException('Recovery data is invalid.');
+    }
     final box = SecretBox(
       combined.sublist(0, 32),
       nonce: base64Url.decode(base64Url.normalize(envelope['nonce'] as String)),
@@ -213,7 +218,10 @@ class ApiClient {
 
   String _encode(List<int> bytes) => base64UrlEncode(bytes).replaceAll('=', '');
 
-  Future<int> syncQueued() async {
+  Future<int> syncQueued({
+    void Function(String id, int sent, int total)? onUploadProgress,
+    bool Function(String id)? isUploadCancelled,
+  }) async {
     final token = await _storage.read(key: 'account_access_token');
     if (token == null) throw StateError('Sign in to sync your vault.');
     var completed = 0;
@@ -235,6 +243,7 @@ class ApiClient {
     for (final file in await vault.listFiles()) {
       if (file.syncState == 'synced' || file.syncState == 'conflict') continue;
       await vault.setSyncState(file.id, 'uploading');
+      onUploadProgress?.call(file.id, 0, file.size);
       try {
         if (file.syncState == 'rename_pending') {
           if (file.remoteUpdatedAt != null) {
@@ -253,8 +262,9 @@ class ApiClient {
               }),
             );
             if (renamed.statusCode == 409) throw const SyncConflict();
-            if (renamed.statusCode < 200 || renamed.statusCode >= 300)
+            if (renamed.statusCode < 200 || renamed.statusCode >= 300) {
               throw Exception('Rename sync failed');
+            }
             final updatedAt = DateTime.parse(
               (jsonDecode(renamed.body) as Map<String, dynamic>)['updatedAt']
                   as String,
@@ -265,11 +275,19 @@ class ApiClient {
           }
           await vault.setSyncState(file.id, 'queued');
         }
-        final updatedAt = await _upload(token, file);
+        final updatedAt = await _upload(
+          token,
+          file,
+          onProgress: (sent, total) =>
+              onUploadProgress?.call(file.id, sent, total),
+          isCancelled: () => isUploadCancelled?.call(file.id) ?? false,
+        );
         await vault.markSynced(file.id, updatedAt);
         completed++;
       } on SyncConflict {
         await vault.setSyncState(file.id, 'conflict');
+      } on UploadCancelled {
+        await vault.setSyncState(file.id, 'queued');
       } catch (_) {
         await vault.setSyncState(file.id, 'failed');
       }
@@ -277,13 +295,25 @@ class ApiClient {
     return completed;
   }
 
-  Future<void> uploadSingleFile(VaultFile file) async {
+  Future<void> uploadSingleFile(
+    VaultFile file, {
+    void Function(int sent, int total)? onProgress,
+    bool Function()? isCancelled,
+  }) async {
     final token = await _storage.read(key: 'account_access_token');
     if (token == null) throw StateError('Sign in to upload files to cloud.');
     await vault.setSyncState(file.id, 'uploading');
     try {
-      final updatedAt = await _upload(token, file);
+      final updatedAt = await _upload(
+        token,
+        file,
+        onProgress: onProgress,
+        isCancelled: isCancelled,
+      );
       await vault.markSynced(file.id, updatedAt);
+    } on UploadCancelled {
+      await vault.setSyncState(file.id, 'queued');
+      rethrow;
     } catch (_) {
       await vault.setSyncState(file.id, 'failed');
       rethrow;
@@ -346,11 +376,18 @@ class ApiClient {
     }
   }
 
-  Future<SyncSummary> syncAll({bool downloadMissing = true}) async {
+  Future<SyncSummary> syncAll({
+    bool downloadMissing = true,
+    void Function(String id, int sent, int total)? onUploadProgress,
+    bool Function(String id)? isUploadCancelled,
+  }) async {
     final token = await _storage.read(key: 'account_access_token');
     if (token == null) throw StateError('Sign in to sync with cloud.');
 
-    final uploadedCount = await syncQueued();
+    final uploadedCount = await syncQueued(
+      onUploadProgress: onUploadProgress,
+      isUploadCancelled: isUploadCancelled,
+    );
     var downloadedCount = 0;
     List<Map<String, dynamic>> cloudFiles = [];
 
@@ -377,7 +414,12 @@ class ApiClient {
     );
   }
 
-  Future<DateTime> _upload(String token, VaultFile file) async {
+  Future<DateTime> _upload(
+    String token,
+    VaultFile file, {
+    void Function(int sent, int total)? onProgress,
+    bool Function()? isCancelled,
+  }) async {
     final headers = {
       'authorization': 'Bearer $token',
       'content-type': 'application/json',
@@ -393,11 +435,13 @@ class ApiClient {
         'size': file.size,
       }),
     );
-    if (begin.statusCode < 200 || begin.statusCode >= 300)
+    if (begin.statusCode < 200 || begin.statusCode >= 300) {
       throw Exception('Upload could not be started');
+    }
     final payload = jsonDecode(begin.body) as Map<String, dynamic>;
-    if (payload['alreadyUploaded'] == true)
+    if (payload['alreadyUploaded'] == true) {
       return DateTime.parse(payload['updatedAt'] as String);
+    }
     final request = http.StreamedRequest(
       'PUT',
       Uri.parse(payload['uploadUrl'] as String),
@@ -406,15 +450,43 @@ class ApiClient {
     final local = File(file.localPath);
     request.contentLength = await local.length();
     final sendFuture = _client.send(request);
-    await request.sink.addStream(local.openRead());
-    await request.sink.close();
+    var sentBytes = 0;
+    var requestClosed = false;
+    Future<void> closeRequest() async {
+      if (requestClosed) return;
+      requestClosed = true;
+      await request.sink.close();
+    }
+
+    try {
+      await for (final chunk in local.openRead()) {
+        if (isCancelled?.call() ?? false) {
+          await closeRequest();
+          try {
+            await sendFuture;
+          } catch (_) {
+            // Consume the failed response from the intentionally truncated upload.
+          }
+          throw const UploadCancelled();
+        }
+        request.sink.add(chunk);
+        sentBytes += chunk.length;
+        onProgress?.call(sentBytes, request.contentLength!);
+      }
+      await closeRequest();
+    } catch (_) {
+      await closeRequest();
+      rethrow;
+    }
     final response = await sendFuture;
-    if (response.statusCode < 200 || response.statusCode >= 300)
+    if (response.statusCode < 200 || response.statusCode >= 300) {
       throw Exception('Encrypted file upload failed');
+    }
     final completeUri = await _uri('files/${file.id}/complete');
     final complete = await _client.post(completeUri, headers: headers);
-    if (complete.statusCode < 200 || complete.statusCode >= 300)
+    if (complete.statusCode < 200 || complete.statusCode >= 300) {
       throw Exception('Upload confirmation failed');
+    }
     return DateTime.parse(
       (jsonDecode(complete.body) as Map<String, dynamic>)['updatedAt']
           as String,
@@ -446,8 +518,9 @@ class ApiClient {
       }),
     );
     if (response.statusCode == 409) throw const SyncConflict();
-    if (response.statusCode < 200 || response.statusCode >= 300)
+    if (response.statusCode < 200 || response.statusCode >= 300) {
       throw Exception('The cloud name could not be updated.');
+    }
     await vault.markSynced(
       file.id,
       DateTime.parse(
@@ -460,4 +533,8 @@ class ApiClient {
 
 class SyncConflict implements Exception {
   const SyncConflict();
+}
+
+class UploadCancelled implements Exception {
+  const UploadCancelled();
 }

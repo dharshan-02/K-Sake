@@ -19,7 +19,7 @@ class _LockScreenState extends State<LockScreen> {
   final _authService = AuthService();
   final _localAuth = LocalAuthentication();
 
-  AuthLockType _currentType = AuthLockType.pin;
+  AuthLockType _currentType = AuthLockType.password;
   String _enteredPin = '';
   final _passwordController = TextEditingController();
   bool _obscurePassword = true;
@@ -44,6 +44,7 @@ class _LockScreenState extends State<LockScreen> {
 
   Future<void> _loadPreferredLock() async {
     final type = await _authService.getPreferredLockType();
+    if (!mounted) return;
     setState(() => _currentType = type);
     if (type == AuthLockType.biometric) {
       WidgetsBinding.instance.addPostFrameCallback(
@@ -126,7 +127,7 @@ class _LockScreenState extends State<LockScreen> {
     }
 
     final realPin = await _authService.getPin();
-    if (pin == realPin || (realPin == null && pin == '1234')) {
+    if (realPin != null && pin == realPin) {
       await widget.vault.initialize();
       widget.onUnlock(false); // Open Normal Vault
       return;
@@ -142,11 +143,17 @@ class _LockScreenState extends State<LockScreen> {
 
   Future<void> _checkPattern(String pattern) async {
     final savedPattern = await _authService.getPattern();
-    if (savedPattern == null || pattern == savedPattern) {
+    if (savedPattern != null && pattern == savedPattern) {
       await widget.vault.initialize();
       widget.onUnlock(false);
     } else {
-      setState(() => _error = 'Incorrect pattern. Try again.');
+      if (mounted) {
+        setState(
+          () => _error = savedPattern == null
+              ? 'No pattern is configured. Choose your saved unlock method in Settings.'
+              : 'Incorrect pattern. Try again.',
+        );
+      }
     }
   }
 
@@ -250,35 +257,6 @@ class _LockScreenState extends State<LockScreen> {
                       ),
                       const SizedBox(height: 20),
 
-                      // Mode Selector Row
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          _buildModeIcon(
-                            Icons.dialpad,
-                            AuthLockType.pin,
-                            'PIN',
-                          ),
-                          const SizedBox(width: 12),
-                          _buildModeIcon(
-                            Icons.gesture,
-                            AuthLockType.pattern,
-                            'Pattern',
-                          ),
-                          const SizedBox(width: 12),
-                          _buildModeIcon(
-                            Icons.fingerprint,
-                            AuthLockType.biometric,
-                            'Biometrics',
-                          ),
-                          const SizedBox(width: 12),
-                          _buildModeIcon(
-                            Icons.password,
-                            AuthLockType.password,
-                            'Password',
-                          ),
-                        ],
-                      ),
                       const SizedBox(height: 20),
 
                       if (_error != null) ...[
@@ -363,44 +341,6 @@ class _LockScreenState extends State<LockScreen> {
               ),
             ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildModeIcon(IconData icon, AuthLockType type, String tooltip) {
-    final isSelected = _currentType == type;
-    final colorScheme = Theme.of(context).colorScheme;
-
-    return Tooltip(
-      message: tooltip,
-      child: InkWell(
-        onTap: () {
-          setState(() {
-            _currentType = type;
-            _error = null;
-          });
-          if (type == AuthLockType.biometric) {
-            _authenticateBiometric();
-          }
-        },
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: isSelected ? colorScheme.primary : colorScheme.surface,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: isSelected
-                  ? colorScheme.primary
-                  : Theme.of(context).dividerColor.withValues(alpha: 0.2),
-            ),
-          ),
-          child: Icon(
-            icon,
-            size: 22,
-            color: isSelected ? colorScheme.onPrimary : colorScheme.onSurface,
-          ),
-        ),
       ),
     );
   }

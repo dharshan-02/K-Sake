@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:local_auth/local_auth.dart';
+
 import '../data/local_vault.dart';
 import '../data/api_client.dart';
 import '../data/auth_service.dart';
@@ -23,12 +25,18 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   final _authService = AuthService();
-  AuthLockType _lockType = AuthLockType.pin;
-  String _hiddenPin = '9999';
-  bool _hiddenEnabled = true;
+  AuthLockType _lockType = AuthLockType.password;
+  String _hiddenPin = '';
+  bool _hiddenEnabled = false;
   int _autoLockMin = 0;
-  Map<String, dynamic> _stats = {'fileCount': 0, 'totalBytes': 0, 'noteCount': 0, 'credentialCount': 0};
+  Map<String, dynamic> _stats = {
+    'fileCount': 0,
+    'totalBytes': 0,
+    'noteCount': 0,
+    'credentialCount': 0,
+  };
   String? _userEmail;
+  String _accountMode = 'device';
   String _serverUrl = 'http://10.0.2.2:3000/v1';
   bool _hasSession = false;
 
@@ -47,6 +55,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final api = ApiClient(widget.vault);
     final hasSession = await api.hasSession;
     final email = await api.userEmail ?? await _authService.getUserEmail();
+    final accountMode = await _authService.getAccountMode();
     final sUrl = await ApiClient.getBaseUrl();
 
     if (mounted) {
@@ -58,6 +67,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _stats = stats;
         _hasSession = hasSession;
         _userEmail = email;
+        _accountMode = accountMode;
         _serverUrl = sUrl;
       });
     }
@@ -103,7 +113,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
             child: const Text('Save'),
@@ -116,9 +129,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await ApiClient.setBaseUrl(updated);
       await _loadSettings();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Server URL set to: $updated')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Server URL set to: $updated')));
       }
     }
   }
@@ -126,15 +139,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _syncNow() async {
     final messenger = ScaffoldMessenger.of(context);
     try {
-      final summary = await ApiClient(widget.vault).syncAll(downloadMissing: true);
+      final summary = await ApiClient(widget.vault)
+          .syncAll(downloadMissing: true);
       messenger.showSnackBar(
-        SnackBar(content: Text('Sync complete: ${summary.uploaded} uploaded, ${summary.downloaded} downloaded.')),
+        SnackBar(
+          content: Text(
+            'Sync complete: ${summary.uploaded} uploaded, ${summary.downloaded} downloaded.',
+          ),
+        ),
       );
       await _loadSettings();
     } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(content: Text('Sync failed: $e')),
-      );
+      messenger.showSnackBar(SnackBar(content: Text('Sync failed: $e')));
     }
   }
 
@@ -147,8 +163,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
           'Your local encrypted files will remain safe on this phone. You can sign in anytime to re-enable cloud sync.',
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Sign Out')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Sign Out'),
+          ),
         ],
       ),
     );
@@ -166,7 +188,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _formatBytes(int bytes) {
     if (bytes < 1024) return '$bytes B';
     if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    if (bytes < 1024 * 1024 * 1024) return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    }
     return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
   }
 
@@ -187,7 +211,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
             onPressed: () async {
               if (pinCtrl.text.trim().length >= 4) {
@@ -234,7 +261,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
             onPressed: () async {
               if (pinCtrl.text.trim().length >= 4) {
@@ -265,7 +295,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                newPattern != null ? 'Pattern Recorded!' : 'Connect at least 4 dots',
+                newPattern != null
+                    ? 'Pattern Recorded!'
+                    : 'Connect at least 4 dots',
                 style: TextStyle(
                   color: newPattern != null ? Colors.green : null,
                   fontWeight: FontWeight.w600,
@@ -274,12 +306,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const SizedBox(height: 12),
               PatternLockView(
                 dimension: 220,
-                onComplete: (pattern) => setDlgState(() => newPattern = pattern),
+                onComplete: (pattern) =>
+                    setDlgState(() => newPattern = pattern),
               ),
             ],
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
             FilledButton(
               onPressed: newPattern == null
                   ? null
@@ -288,7 +324,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       await _authService.setPattern(newPattern!);
                       if (ctx.mounted) Navigator.pop(ctx);
                       messenger.showSnackBar(
-                        const SnackBar(content: Text('Unlock pattern updated.')),
+                        const SnackBar(
+                          content: Text('Unlock pattern updated.'),
+                        ),
                       );
                     },
               child: const Text('Save Pattern'),
@@ -316,19 +354,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Theme Preset', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                  const Text(
+                    'Theme Preset',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                  ),
                   const SizedBox(height: 4),
-                  Text('Select your preferred visual style', style: TextStyle(color: theme.hintColor, fontSize: 13)),
+                  Text(
+                    'Select your preferred visual style',
+                    style: TextStyle(color: theme.hintColor, fontSize: 13),
+                  ),
                   const SizedBox(height: 16),
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,
                     children: [
                       _buildThemeChip('Light', AppThemePreset.light, themeCtrl),
-                      _buildThemeChip('Dark Slate', AppThemePreset.dark, themeCtrl),
-                      _buildThemeChip('Midnight AMOLED', AppThemePreset.amoled, themeCtrl),
-                      _buildThemeChip('Emerald Forest', AppThemePreset.emerald, themeCtrl),
-                      _buildThemeChip('Cyberpunk', AppThemePreset.cyberpunk, themeCtrl),
+                      _buildThemeChip(
+                        'Dark Slate',
+                        AppThemePreset.dark,
+                        themeCtrl,
+                      ),
+                      _buildThemeChip(
+                        'Midnight AMOLED',
+                        AppThemePreset.amoled,
+                        themeCtrl,
+                      ),
+                      _buildThemeChip(
+                        'Emerald Forest',
+                        AppThemePreset.emerald,
+                        themeCtrl,
+                      ),
+                      _buildThemeChip(
+                        'Cyberpunk',
+                        AppThemePreset.cyberpunk,
+                        themeCtrl,
+                      ),
                     ],
                   ),
                 ],
@@ -350,17 +410,92 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     value: _lockType,
                     underline: const SizedBox(),
                     items: const [
-                      DropdownMenuItem(value: AuthLockType.biometric, child: Text('Biometric')),
-                      DropdownMenuItem(value: AuthLockType.pin, child: Text('PIN')),
-                      DropdownMenuItem(value: AuthLockType.pattern, child: Text('Pattern')),
-                      DropdownMenuItem(value: AuthLockType.password, child: Text('Password')),
+                      DropdownMenuItem(
+                        value: AuthLockType.biometric,
+                        child: Text('Biometric'),
+                      ),
+                      DropdownMenuItem(
+                        value: AuthLockType.pin,
+                        child: Text('PIN'),
+                      ),
+                      DropdownMenuItem(
+                        value: AuthLockType.pattern,
+                        child: Text('Pattern'),
+                      ),
+                      DropdownMenuItem(
+                        value: AuthLockType.password,
+                        child: Text('Password'),
+                      ),
                     ],
                     onChanged: (val) async {
-                      if (val != null) {
-                        await _authService.setPreferredLockType(val);
-                        setState(() => _lockType = val);
+                      if (val == null) return;
+                      final messenger = ScaffoldMessenger.of(context);
+                      if (val == AuthLockType.pin &&
+                          await _authService.getPin() == null) {
+                        if (mounted) {
+                          messenger.showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Set a vault PIN before choosing PIN unlock.',
+                              ),
+                            ),
+                          );
+                        }
+                        return;
                       }
+                      if (val == AuthLockType.pattern &&
+                          await _authService.getPattern() == null) {
+                        if (mounted) {
+                          messenger.showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Create a pattern before choosing pattern unlock.',
+                              ),
+                            ),
+                          );
+                        }
+                        return;
+                      }
+                      if (val == AuthLockType.biometric) {
+                        try {
+                          final auth = LocalAuthentication();
+                          final available = await auth.getAvailableBiometrics();
+                          if (!await auth.canCheckBiometrics ||
+                              available.isEmpty) {
+                            if (mounted) {
+                              messenger.showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'Set up biometrics in your device settings first.',
+                                  ),
+                                ),
+                              );
+                            }
+                            return;
+                          }
+                        } catch (_) {
+                          if (mounted) {
+                            messenger.showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Biometric unlock is not available on this device.',
+                                ),
+                              ),
+                            );
+                          }
+                          return;
+                        }
+                      }
+                      await _authService.setPreferredLockType(val);
+                      if (mounted) setState(() => _lockType = val);
                     },
+                  ),
+                ),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  child: Text(
+                    'Biometrics gate access through the operating system; they are not stored by Keepsake and do not replace file encryption.',
+                    style: TextStyle(fontSize: 12),
                   ),
                 ),
                 const Divider(height: 1),
@@ -381,7 +516,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ListTile(
                   leading: const Icon(Icons.timer_outlined),
                   title: const Text('Auto-Lock on Background'),
-                  subtitle: Text(_autoLockMin == 0 ? 'Immediately' : 'After $_autoLockMin min'),
+                  subtitle: Text(
+                    _autoLockMin == 0
+                        ? 'Immediately'
+                        : 'After $_autoLockMin min',
+                  ),
                   trailing: DropdownButton<int>(
                     value: _autoLockMin,
                     underline: const SizedBox(),
@@ -405,14 +544,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 16),
 
           // Hidden Vault / Plausible Deniability Section
-          _buildSectionHeader('Hidden Vault (Plausible Deniability)', Icons.visibility_off_outlined),
+          _buildSectionHeader(
+            'Hidden Vault (Plausible Deniability)',
+            Icons.visibility_off_outlined,
+          ),
           Card(
             child: Column(
               children: [
                 SwitchListTile(
                   secondary: const Icon(Icons.shield_moon_outlined),
                   title: const Text('Enable Hidden Vault'),
-                  subtitle: const Text('Isolated decoy safe opened via secondary PIN'),
+                  subtitle: const Text(
+                    'Isolated decoy safe opened via secondary PIN',
+                  ),
                   value: _hiddenEnabled,
                   onChanged: (val) async {
                     await _authService.setHiddenVaultEnabled(val);
@@ -445,9 +589,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     mainAxisAlignment: MainAxisAlignment.spaceAround,
                     children: [
                       _buildStatColumn('Files', '${_stats['fileCount']}'),
-                      _buildStatColumn('Storage', _formatBytes(_stats['totalBytes'] as int)),
+                      _buildStatColumn(
+                        'Storage',
+                        _formatBytes(_stats['totalBytes'] as int),
+                      ),
                       _buildStatColumn('Notes', '${_stats['noteCount']}'),
-                      _buildStatColumn('Passwords', '${_stats['credentialCount']}'),
+                      _buildStatColumn(
+                        'Passwords',
+                        '${_stats['credentialCount']}',
+                      ),
                     ],
                   ),
                   const SizedBox(height: 16),
@@ -455,13 +605,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ListTile(
                     leading: const Icon(Icons.cleaning_services_outlined),
                     title: const Text('Clear Decrypted Preview Cache'),
-                    subtitle: const Text('Safely purges decrypted temporary view files'),
+                    subtitle: const Text(
+                      'Safely purges decrypted temporary view files',
+                    ),
                     contentPadding: EdgeInsets.zero,
                     onTap: () async {
                       final messenger = ScaffoldMessenger.of(context);
                       await widget.vault.clearPreviewCache();
                       messenger.showSnackBar(
-                        const SnackBar(content: Text('Decrypted preview cache cleared.')),
+                        const SnackBar(
+                          content: Text('Decrypted preview cache cleared.'),
+                        ),
                       );
                     },
                   ),
@@ -472,57 +626,91 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 16),
 
           // Multi-Device Cloud Sync Section
-          _buildSectionHeader('Multi-Device Cloud Sync', Icons.cloud_sync_outlined),
+          _buildSectionHeader('Account & Sync', Icons.cloud_sync_outlined),
           Card(
             child: Column(
               children: [
                 ListTile(
                   leading: Icon(
-                    _hasSession ? Icons.cloud_done_rounded : Icons.cloud_off_rounded,
+                    _hasSession
+                        ? Icons.cloud_done_rounded
+                        : Icons.cloud_off_rounded,
                     color: _hasSession ? Colors.green : Colors.grey,
                   ),
                   title: Text(
-                    _userEmail != null && _userEmail!.isNotEmpty
+                    _hasSession && _userEmail != null && _userEmail!.isNotEmpty
                         ? _userEmail!
-                        : 'Offline Vault (No Account Linked)',
+                        : _hasSession
+                        ? 'Cloud account connected'
+                        : _accountMode == 'cloud'
+                        ? 'Cloud account · signed out'
+                        : 'Device-only vault',
                     style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                   subtitle: Text(
                     _hasSession
-                        ? 'Cloud sync active · Accessible across devices'
-                        : 'Link an email to access your files on multiple devices',
+                        ? 'Cloud account connected. Sync encrypted file copies while online.'
+                        : _accountMode == 'cloud'
+                        ? 'Your local files remain here. Sign in to sync again.'
+                        : 'No cloud copy is configured. Files stay on this device.',
                   ),
                 ),
                 const Divider(height: 1),
                 ListTile(
                   leading: const Icon(Icons.sync),
                   title: const Text('Sync with Cloud Now'),
-                  subtitle: const Text('Upload new files and download files from other devices'),
+                  subtitle: const Text(
+                    'Upload queued files and download available cloud copies',
+                  ),
                   trailing: const Icon(Icons.chevron_right),
-                  onTap: _syncNow,
+                  onTap: _hasSession
+                      ? _syncNow
+                      : () => ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Sign in to a cloud account to sync. Your files are still available on this device.',
+                            ),
+                          ),
+                        ),
                 ),
                 const Divider(height: 1),
                 ListTile(
                   leading: const Icon(Icons.cloud_outlined),
                   title: const Text('Browse Cloud Files'),
-                  subtitle: const Text('Inspect and download all files on your cloud account'),
+                  subtitle: Text(
+                    _hasSession
+                        ? 'Inspect and download encrypted files in your account'
+                        : 'Available after you sign in to a cloud account',
+                  ),
                   trailing: const Icon(Icons.chevron_right),
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => CloudFilesScreen(
-                          vault: widget.vault,
-                          api: ApiClient(widget.vault),
+                  onTap: _hasSession
+                      ? () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => CloudFilesScreen(
+                                vault: widget.vault,
+                                api: ApiClient(widget.vault),
+                              ),
+                            ),
+                          );
+                        }
+                      : () => ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Sign in to a cloud account to browse cloud files.',
+                            ),
+                          ),
                         ),
-                      ),
-                    );
-                  },
                 ),
                 const Divider(height: 1),
                 ListTile(
                   leading: const Icon(Icons.dns_outlined),
                   title: const Text('Backend Server URL'),
-                  subtitle: Text(_serverUrl, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  subtitle: Text(
+                    _serverUrl,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                   trailing: const Icon(Icons.edit_outlined),
                   onTap: _showChangeServerUrlDialog,
                 ),
@@ -530,8 +718,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const Divider(height: 1),
                   ListTile(
                     leading: const Icon(Icons.logout, color: Colors.red),
-                    title: const Text('Sign Out', style: TextStyle(color: Colors.red)),
-                    subtitle: const Text('Files will remain safely encrypted on this phone'),
+                    title: const Text(
+                      'Sign Out',
+                      style: TextStyle(color: Colors.red),
+                    ),
+                    subtitle: const Text(
+                      'Files will remain safely encrypted on this phone',
+                    ),
                     onTap: _signOutAccount,
                   ),
                 ],
@@ -546,11 +739,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: Column(
               children: [
                 ListTile(
-                  leading: const Icon(Icons.key),
-                  title: const Text('View Master Recovery Key'),
-                  subtitle: const Text('Zero-knowledge key to restore vault on another phone'),
+                  leading: const Icon(Icons.key_outlined),
+                  title: const Text('Recovery code & device setup'),
+                  subtitle: const Text(
+                    'Restore this vault on a new device. Keep a private backup; losing the key and all unlocked devices means cloud files cannot be decrypted.',
+                  ),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () {
+                    if (!_hasSession) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'A recovery code needs a connected cloud account. Device-only files remain on this phone.',
+                          ),
+                        ),
+                      );
+                      return;
+                    }
                     Navigator.of(context).push(
                       MaterialPageRoute(
                         builder: (_) => RecoveryScreen(
@@ -597,7 +802,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _buildThemeChip(String label, AppThemePreset preset, AppThemeController ctrl) {
+  Widget _buildThemeChip(
+    String label,
+    AppThemePreset preset,
+    AppThemeController ctrl,
+  ) {
     final isSelected = ctrl.preset == preset;
     return ChoiceChip(
       label: Text(label),
@@ -609,9 +818,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget _buildStatColumn(String label, String value) {
     return Column(
       children: [
-        Text(value, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        Text(
+          value,
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
         const SizedBox(height: 4),
-        Text(label, style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor)),
+        Text(
+          label,
+          style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor),
+        ),
       ],
     );
   }

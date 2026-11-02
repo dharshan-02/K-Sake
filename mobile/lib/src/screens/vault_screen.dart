@@ -7,13 +7,18 @@ import 'package:flutter/material.dart';
 
 import '../data/local_vault.dart';
 import '../data/api_client.dart';
+import '../data/auth_service.dart';
 import 'file_preview_screen.dart';
 import 'cloud_files_screen.dart';
 import 'recovery_screen.dart';
 import '../models/vault_file.dart';
 
 class VaultScreen extends StatefulWidget {
-  const VaultScreen({super.key, required this.vault, this.isHiddenVault = false});
+  const VaultScreen({
+    super.key,
+    required this.vault,
+    this.isHiddenVault = false,
+  });
   final LocalVault vault;
   final bool isHiddenVault;
 
@@ -30,6 +35,9 @@ class _VaultScreenState extends State<VaultScreen> {
   late final ApiClient _api = ApiClient(widget.vault);
   StreamSubscription<List<ConnectivityResult>>? _connectivity;
   bool _syncing = false;
+  bool _hasCloudSession = false;
+  final Map<String, double> _uploadProgress = {};
+  final Set<String> _cancelledUploads = {};
 
   @override
   void initState() {
@@ -50,9 +58,11 @@ class _VaultScreenState extends State<VaultScreen> {
 
   Future<void> _reload() async {
     final files = await widget.vault.listFiles(isHidden: widget.isHiddenVault);
+    final hasCloudSession = await _api.hasSession;
     if (mounted) {
       setState(() {
         _files = files;
+        _hasCloudSession = hasCloudSession;
         if (_selectedFolder != null &&
             !files.any((f) => f.folderName == _selectedFolder)) {
           _selectedFolder = null;
@@ -195,19 +205,70 @@ class _VaultScreenState extends State<VaultScreen> {
       _account();
       return;
     }
-    setState(() => _message = 'Uploading "${file.name}" to cloud…');
+    setState(() {
+      _message = 'Uploading "${file.name}"…';
+      _uploadProgress[file.id] = 0;
+      _cancelledUploads.remove(file.id);
+      _files = _files
+          .map(
+            (item) =>
+                item.id == file.id ? _withSyncState(item, 'uploading') : item,
+          )
+          .toList();
+    });
     try {
-      await _api.uploadSingleFile(file);
+      await _api.uploadSingleFile(
+        file,
+        onProgress: (sent, total) {
+          if (!mounted) return;
+          setState(
+            () => _uploadProgress[file.id] = total == 0 ? 0 : sent / total,
+          );
+        },
+        isCancelled: () => _cancelledUploads.contains(file.id),
+      );
       await _reload();
       if (mounted) {
-        setState(() => _message = 'Uploaded "${file.name}" to cloud.');
+        setState(() => _message = '“${file.name}” is synced.');
+      }
+    } on UploadCancelled {
+      if (mounted) {
+        setState(
+          () => _message = 'Upload cancelled. The encrypted file stays on this device and can be retried.',
+        );
       }
     } catch (e) {
       if (mounted) {
-        setState(() => _message = 'Upload failed: $e');
+        setState(
+          () => _message = 'Upload interrupted. The encrypted file stays on this device. Retry when you’re online.',
+        );
       }
+    } finally {
+      _cancelledUploads.remove(file.id);
+      _uploadProgress.remove(file.id);
+      await _reload();
     }
   }
+
+  void _cancelUpload(String id) {
+    setState(() {
+      _cancelledUploads.add(id);
+      _message = 'Cancelling upload… The local encrypted copy will be kept.';
+    });
+  }
+
+  VaultFile _withSyncState(VaultFile file, String state) => VaultFile(
+    id: file.id,
+    name: file.name,
+    mimeType: file.mimeType,
+    size: file.size,
+    createdAt: file.createdAt,
+    localPath: file.localPath,
+    syncState: state,
+    folderName: file.folderName,
+    remoteUpdatedAt: file.remoteUpdatedAt,
+    isHidden: file.isHidden,
+  );
 
   Future<void> _resolveConflict(VaultFile file) async {
     final keepLocal = await showDialog<bool>(
@@ -255,13 +316,20 @@ class _VaultScreenState extends State<VaultScreen> {
               if (userEmail != null)
                 ListTile(
                   leading: const Icon(Icons.account_circle, color: Colors.blue),
-                  title: Text(userEmail, style: const TextStyle(fontWeight: FontWeight.bold)),
-                  subtitle: const Text('Linked Account · Cross-device sync active'),
+                  title: Text(
+                    userEmail,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  subtitle: const Text(
+                    'Linked Account · Cross-device sync active',
+                  ),
                 ),
               ListTile(
                 leading: const Icon(Icons.sync),
                 title: const Text('Sync with Cloud (Upload & Download)'),
-                subtitle: const Text('Upload new files and download from other phones'),
+                subtitle: const Text(
+                  'Upload new files and download from other phones',
+                ),
                 onTap: () => Navigator.pop(context, 'sync'),
               ),
               ListTile(
@@ -277,7 +345,10 @@ class _VaultScreenState extends State<VaultScreen> {
               ),
               ListTile(
                 leading: const Icon(Icons.logout, color: Colors.red),
-                title: const Text('Sign out', style: TextStyle(color: Colors.red)),
+                title: const Text(
+                  'Sign out',
+                  style: TextStyle(color: Colors.red),
+                ),
                 onTap: () => Navigator.pop(context, 'signout'),
               ),
             ],
@@ -288,7 +359,8 @@ class _VaultScreenState extends State<VaultScreen> {
         await _api.signOut();
         if (mounted) {
           setState(
-            () => _message = 'Signed out. Files remain available on this device.',
+            () =>
+                _message = 'Signed out. Files remain available on this device.',
           );
         }
       }
@@ -326,7 +398,7 @@ class _VaultScreenState extends State<VaultScreen> {
       await _sync();
       if (mounted) {
         setState(
-          () => _message = 'Account connected. Synced with cloud.',
+          () => _message = 'Cloud account connected. File sync status appears beside each file.',
         );
       }
     }
@@ -339,12 +411,29 @@ class _VaultScreenState extends State<VaultScreen> {
       setState(() => _message = 'Syncing encrypted files with cloud…');
     }
     try {
-      final summary = await _api.syncAll(downloadMissing: true);
+      final summary = await _api.syncAll(
+        downloadMissing: true,
+        onUploadProgress: (id, sent, total) {
+          if (!mounted) return;
+          setState(() {
+            _uploadProgress[id] = total == 0 ? 0 : sent / total;
+            _files = _files
+                .map(
+                  (file) =>
+                      file.id == id ? _withSyncState(file, 'uploading') : file,
+                )
+                .toList();
+          });
+        },
+        isUploadCancelled: (id) => _cancelledUploads.contains(id),
+      );
       await _reload();
       if (mounted && !silent) {
         final parts = <String>[];
         if (summary.uploaded > 0) parts.add('${summary.uploaded} uploaded');
-        if (summary.downloaded > 0) parts.add('${summary.downloaded} downloaded');
+        if (summary.downloaded > 0) {
+          parts.add('${summary.downloaded} downloaded');
+        }
         setState(
           () => _message = parts.isEmpty
               ? 'Vault up to date (${summary.totalCloud} in cloud)'
@@ -358,7 +447,16 @@ class _VaultScreenState extends State<VaultScreen> {
         );
       }
     } finally {
+      final cancelled = _cancelledUploads.isNotEmpty;
       _syncing = false;
+      _uploadProgress.clear();
+      _cancelledUploads.clear();
+      await _reload();
+      if (cancelled && mounted) {
+        setState(
+          () => _message = 'Upload cancelled. The encrypted file remains on this device and can be retried.',
+        );
+      }
     }
   }
 
@@ -381,7 +479,7 @@ class _VaultScreenState extends State<VaultScreen> {
         .toList();
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.isHiddenVault ? 'Decoy / Hidden Safe' : 'Keepsake Vault'),
+        title: Text(widget.isHiddenVault ? 'Hidden Safe' : 'Files'),
         actions: [
           IconButton(
             onPressed: () => _sync(silent: false),
@@ -389,17 +487,8 @@ class _VaultScreenState extends State<VaultScreen> {
             icon: const Icon(Icons.sync),
           ),
           IconButton(
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => CloudFilesScreen(vault: widget.vault, api: _api),
-              ),
-            ),
-            tooltip: 'Cloud Vault',
-            icon: const Icon(Icons.cloud_outlined),
-          ),
-          IconButton(
             onPressed: _account,
-            tooltip: 'Account Settings',
+            tooltip: 'Cloud account and recovery',
             icon: const Icon(Icons.account_circle_outlined),
           ),
           IconButton(
@@ -411,20 +500,36 @@ class _VaultScreenState extends State<VaultScreen> {
       ),
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      widget.isHiddenVault ? 'Hidden Safe' : 'Your files',
+                      style: Theme.of(context).textTheme.titleLarge
+                          ?.copyWith(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  FilledButton.tonalIcon(
+                    onPressed: _import,
+                    icon: const Icon(Icons.add_rounded),
+                    label: const Text('Add files'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
               Text(
-                widget.isHiddenVault ? 'Hidden Safe Vault' : 'Your private space',
-                style: Theme.of(context).textTheme.headlineMedium
-                    ?.copyWith(fontWeight: FontWeight.w700),
+                _hasCloudSession
+                    ? 'Encrypted on this device · Cloud account connected'
+                    : 'Encrypted on this device · Sync when you connect an account',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
-              const SizedBox(height: 6),
-              const Text(
-                'Encrypted client-side. Multi-device cloud sync enabled.',
-              ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 10),
               TextField(
                 decoration: InputDecoration(
                   prefixIcon: const Icon(Icons.search),
@@ -448,7 +553,7 @@ class _VaultScreenState extends State<VaultScreen> {
                     ),
                   ),
                 ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 8),
               Row(
                 children: [
                   Text(
@@ -502,54 +607,51 @@ class _VaultScreenState extends State<VaultScreen> {
           ),
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _import,
-        icon: const Icon(Icons.upload_file),
-        label: const Text('Add files'),
-      ),
     );
   }
 
   Widget _empty(BuildContext context) => Center(
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        const Icon(Icons.folder_open_outlined, size: 48),
-        const SizedBox(height: 12),
-        Text(
-          _query.isEmpty ? 'Your vault is ready' : 'No matching files',
-          style: Theme.of(context).textTheme.titleMedium,
-        ),
-        const SizedBox(height: 6),
-        Text(
-          _query.isEmpty
-              ? 'Add documents or photos to keep them protected here.'
-              : 'Try another name.',
-        ),
-        if (_query.isEmpty) ...[
-          const SizedBox(height: 16),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              OutlinedButton.icon(
-                onPressed: _import,
-                icon: const Icon(Icons.add),
-                label: const Text('Add files'),
-              ),
-              const SizedBox(width: 12),
-              FilledButton.tonalIcon(
+    child: SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          const Icon(Icons.folder_open_outlined, size: 40),
+          const SizedBox(height: 8),
+          Text(
+            _query.isEmpty ? 'Nothing here yet' : 'No matching files',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 6),
+          Text(
+            _query.isEmpty
+                ? 'Add a document or photo. It stays encrypted on this device until you sync it.'
+                : 'Try another name.',
+          ),
+          if (_query.isEmpty) ...[
+            const SizedBox(height: 12),
+            FilledButton.tonalIcon(
+              onPressed: _import,
+              icon: const Icon(Icons.add),
+              label: const Text('Add a file or photo'),
+            ),
+            if (_hasCloudSession) ...[
+              const SizedBox(height: 4),
+              TextButton.icon(
                 onPressed: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(
-                    builder: (_) => CloudFilesScreen(vault: widget.vault, api: _api),
+                    builder: (_) =>
+                        CloudFilesScreen(vault: widget.vault, api: _api),
                   ),
                 ),
                 icon: const Icon(Icons.cloud_download_outlined),
-                label: const Text('Cloud Files'),
+                label: const Text('Browse synced files'),
               ),
             ],
-          ),
+          ],
         ],
-      ],
+      ),
     ),
   );
 
@@ -572,48 +674,39 @@ class _VaultScreenState extends State<VaultScreen> {
         ),
       ),
       title: Text(file.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-      subtitle: Row(
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(_size(file.size)),
-          const Text(' · '),
-          Icon(
-            switch (file.syncState) {
-              'synced' => Icons.cloud_done_rounded,
-              'uploading' => Icons.cloud_upload_outlined,
-              'failed' => Icons.cloud_off_rounded,
-              'conflict' => Icons.warning_amber_rounded,
-              _ => Icons.cloud_queue_rounded,
-            },
-            size: 14,
-            color: switch (file.syncState) {
-              'synced' => Colors.green,
-              'uploading' => Colors.blue,
-              'failed' => Colors.red,
-              'conflict' => Colors.orange,
-              _ => Colors.grey,
-            },
+          Text('${_size(file.size)} · ${file.folderName ?? 'No folder'}'),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              _syncStatus(context, file),
+              if (file.syncState == 'uploading') ...[
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    _uploadProgress.containsKey(file.id)
+                        ? '${((_uploadProgress[file.id] ?? 0) * 100).round()}%'
+                        : 'Preparing upload…',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ],
           ),
-          const SizedBox(width: 4),
-          Expanded(
-            child: Text(
-              switch (file.syncState) {
-                'synced' => 'Synced',
-                'uploading' => 'Uploading…',
-                'failed' => 'Sync failed',
-                'conflict' => 'Conflict',
-                _ => 'Local only',
-              },
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 12),
-            ),
-          ),
+          if (file.syncState == 'uploading') ...[
+            const SizedBox(height: 6),
+            LinearProgressIndicator(value: _uploadProgress[file.id]),
+          ],
         ],
       ),
       trailing: PopupMenuButton<String>(
         tooltip: 'File actions',
         onSelected: (value) async {
           if (value == 'upload') _uploadFile(file);
+          if (value == 'cancel') _cancelUpload(file.id);
           if (value == 'delete') _delete(file);
           if (value == 'rename') _rename(file);
           if (value == 'folder') _moveToFolder(file);
@@ -624,14 +717,25 @@ class _VaultScreenState extends State<VaultScreen> {
           }
         },
         itemBuilder: (_) => [
-          if (file.syncState != 'synced')
+          if (file.syncState == 'uploading')
+            const PopupMenuItem(
+              value: 'cancel',
+              child: Row(
+                children: [
+                  Icon(Icons.close_rounded, size: 18),
+                  SizedBox(width: 8),
+                  Text('Cancel upload'),
+                ],
+              ),
+            )
+          else if (file.syncState != 'synced' && file.syncState != 'conflict')
             const PopupMenuItem(
               value: 'upload',
               child: Row(
                 children: [
                   Icon(Icons.cloud_upload_outlined, size: 18),
                   SizedBox(width: 8),
-                  Text('Upload to Cloud'),
+                  Text('Retry upload'),
                 ],
               ),
             ),
@@ -639,7 +743,9 @@ class _VaultScreenState extends State<VaultScreen> {
           const PopupMenuItem(value: 'folder', child: Text('Move to folder')),
           PopupMenuItem(
             value: 'toggle_hidden',
-            child: Text(file.isHidden ? 'Move to normal vault' : 'Move to hidden safe'),
+            child: Text(
+              file.isHidden ? 'Move to normal vault' : 'Move to hidden safe',
+            ),
           ),
           if (file.syncState == 'conflict')
             const PopupMenuItem(
@@ -656,6 +762,50 @@ class _VaultScreenState extends State<VaultScreen> {
     if (bytes < 1024) return '$bytes B';
     if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
     return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
+  Widget _syncStatus(BuildContext context, VaultFile file) {
+    final (label, icon, color) = switch (file.syncState) {
+      'synced' => ('Synced', Icons.cloud_done_rounded, Colors.green),
+      'uploading' => ('Uploading', Icons.cloud_upload_outlined, Colors.blue),
+      'failed' || 'conflict' => (
+        'Needs attention',
+        Icons.warning_amber_rounded,
+        Colors.orange,
+      ),
+      'queued' || 'rename_pending' when _hasCloudSession => (
+        'Queued',
+        Icons.cloud_queue_rounded,
+        Colors.blueGrey,
+      ),
+      _ => ('On this device', Icons.phone_android_rounded, Colors.blueGrey),
+    };
+    final scheme = Theme.of(context).colorScheme;
+    return Semantics(
+      label: 'Sync status: $label',
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.14),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 14, color: color),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: TextStyle(
+                color: scheme.onSurface,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -687,12 +837,24 @@ class _AccountDialogState extends State<_AccountDialog> {
     try {
       final email = _email.text.trim().toLowerCase();
       final password = _password.text;
-      await ApiClient(LocalVault()).authenticate(
-        email,
-        password,
-        createAccount: _create,
-      );
+      final localAuth = AuthService();
+      if (await localAuth.isRegistered()) {
+        final localEmail = (await localAuth.getUserEmail())?.toLowerCase();
+        final localPassword = await localAuth.getPassword();
+        if (localEmail != email || localPassword != password) {
+          throw StateError(
+            'Use the email and password that unlocked this device. Different credentials derive a different vault key and cannot safely merge the files already stored here.',
+          );
+        }
+      }
+      await ApiClient(LocalVault())
+          .authenticate(email, password, createAccount: _create);
       await LocalVault().setMasterKeyFromCredentials(email, password);
+      await AuthService().saveAccountCredentials(
+        email: email,
+        password: password,
+        cloudAccount: true,
+      );
       if (mounted) Navigator.pop(context, 'authenticated');
     } catch (e) {
       if (mounted) {
@@ -711,7 +873,7 @@ class _AccountDialogState extends State<_AccountDialog> {
         mainAxisSize: MainAxisSize.min,
         children: [
           const Text(
-            'Files are encrypted client-side. Signing into the same email on another device gives you instant access to all uploaded files.',
+            'Use the same email and password as this device to keep its vault key. Files are encrypted before upload. On a new device, restore the vault with your recovery code, then download files for offline access.',
             style: TextStyle(fontSize: 13),
           ),
           const SizedBox(height: 16),
@@ -726,9 +888,7 @@ class _AccountDialogState extends State<_AccountDialog> {
             controller: _password,
             obscureText: true,
             autofillHints: const [AutofillHints.password],
-            decoration: const InputDecoration(
-              labelText: 'Master Password',
-            ),
+            decoration: const InputDecoration(labelText: 'Master Password'),
           ),
           if (_error != null)
             Padding(

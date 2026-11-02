@@ -1,11 +1,6 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
-enum AuthLockType {
-  biometric,
-  pin,
-  pattern,
-  password,
-}
+enum AuthLockType { biometric, pin, pattern, password }
 
 class AuthService {
   static const _storage = FlutterSecureStorage();
@@ -19,6 +14,7 @@ class AuthService {
   static const _kHiddenPin = 'auth_hidden_vault_pin';
   static const _kHiddenEnabled = 'auth_hidden_vault_enabled';
   static const _kAutoLockMin = 'auth_auto_lock_minutes';
+  static const _kAccountMode = 'account_storage_mode_v1';
 
   Future<bool> isRegistered() async {
     final val = await _storage.read(key: _kRegistered);
@@ -29,6 +25,7 @@ class AuthService {
     required String email,
     required String password,
     required AuthLockType lockType,
+    bool cloudAccount = true,
     String? pin,
     String? pattern,
   }) async {
@@ -36,22 +33,38 @@ class AuthService {
     await _storage.write(key: _kUserEmail, value: email);
     await _storage.write(key: _kPassword, value: password);
     await _storage.write(key: _kLockType, value: lockType.name);
+    await _storage.write(
+      key: _kAccountMode,
+      value: cloudAccount ? 'cloud' : 'device',
+    );
     if (pin != null) await _storage.write(key: _kPin, value: pin);
     if (pattern != null) await _storage.write(key: _kPattern, value: pattern);
-    final hiddenPin = await _storage.read(key: _kHiddenPin);
-    if (hiddenPin == null) {
-      await _storage.write(key: _kHiddenPin, value: '9999');
-      await _storage.write(key: _kHiddenEnabled, value: 'true');
-    }
   }
 
   Future<String?> getUserEmail() => _storage.read(key: _kUserEmail);
+
+  Future<String> getAccountMode() async =>
+      (await _storage.read(key: _kAccountMode)) ?? 'device';
+
+  Future<void> saveAccountCredentials({
+    required String email,
+    required String password,
+    required bool cloudAccount,
+  }) async {
+    await _storage.write(key: _kUserEmail, value: email.trim().toLowerCase());
+    await _storage.write(key: _kPassword, value: password);
+    await _storage.write(
+      key: _kAccountMode,
+      value: cloudAccount ? 'cloud' : 'device',
+    );
+    await _storage.write(key: _kRegistered, value: 'true');
+  }
 
   Future<AuthLockType> getPreferredLockType() async {
     final typeStr = await _storage.read(key: _kLockType);
     return AuthLockType.values.firstWhere(
       (e) => e.name == typeStr,
-      orElse: () => AuthLockType.pin,
+      orElse: () => AuthLockType.password,
     );
   }
 
@@ -70,7 +83,10 @@ class AuthService {
       _storage.write(key: _kPassword, value: password);
 
   Future<String> getHiddenVaultPin() async {
-    return (await _storage.read(key: _kHiddenPin)) ?? '9999';
+    final pin = await _storage.read(key: _kHiddenPin);
+    // Older builds silently initialized every new vault with 9999. Treat that
+    // legacy default as unset so it cannot act as a known unlock credential.
+    return pin == null || pin == '9999' ? '' : pin;
   }
 
   Future<void> setHiddenVaultPin(String pin) =>
@@ -78,7 +94,7 @@ class AuthService {
 
   Future<bool> isHiddenVaultEnabled() async {
     final val = await _storage.read(key: _kHiddenEnabled);
-    return val != 'false';
+    return val == 'true';
   }
 
   Future<void> setHiddenVaultEnabled(bool enabled) =>
@@ -92,4 +108,3 @@ class AuthService {
   Future<void> setAutoLockMinutes(int min) =>
       _storage.write(key: _kAutoLockMin, value: min.toString());
 }
-

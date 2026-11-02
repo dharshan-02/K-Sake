@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+
 import '../data/local_vault.dart';
 import 'vault_screen.dart';
 import 'gallery_screen.dart';
 import 'notes_screen.dart';
 import 'passwords_screen.dart';
+import 'more_screen.dart';
 import 'settings_screen.dart';
 
 class MainDashboard extends StatefulWidget {
@@ -40,8 +42,22 @@ class _MainDashboardState extends State<MainDashboard> {
     final pages = [
       VaultScreen(vault: widget.vault, isHiddenVault: _hiddenMode),
       GalleryScreen(vault: widget.vault, isHiddenVault: _hiddenMode),
-      NotesScreen(vault: widget.vault, isHiddenVault: _hiddenMode),
-      PasswordsScreen(vault: widget.vault, isHiddenVault: _hiddenMode),
+      MoreScreen(
+        onNotes: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) =>
+                NotesScreen(vault: widget.vault, isHiddenVault: _hiddenMode),
+          ),
+        ),
+        onPasswords: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => PasswordsScreen(
+              vault: widget.vault,
+              isHiddenVault: _hiddenMode,
+            ),
+          ),
+        ),
+      ),
       SettingsScreen(vault: widget.vault, onLockNow: widget.onLock),
     ];
 
@@ -70,11 +86,17 @@ class _MainDashboardState extends State<MainDashboard> {
                 decoration: BoxDecoration(
                   color: Colors.amber.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.amber.withValues(alpha: 0.4)),
+                  border: Border.all(
+                    color: Colors.amber.withValues(alpha: 0.4),
+                  ),
                 ),
                 child: const Text(
                   'DECOY',
-                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.amber),
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.amber,
+                  ),
                 ),
               ),
             ],
@@ -94,10 +116,7 @@ class _MainDashboardState extends State<MainDashboard> {
           ),
         ],
       ),
-      body: IndexedStack(
-        index: _currentIndex,
-        children: pages,
-      ),
+      body: IndexedStack(index: _currentIndex, children: pages),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
         onDestinationSelected: (index) => setState(() => _currentIndex = index),
@@ -110,17 +129,12 @@ class _MainDashboardState extends State<MainDashboard> {
           NavigationDestination(
             icon: Icon(Icons.photo_library_outlined),
             selectedIcon: Icon(Icons.photo_library),
-            label: 'Gallery',
+            label: 'Photos',
           ),
           NavigationDestination(
-            icon: Icon(Icons.note_alt_outlined),
-            selectedIcon: Icon(Icons.note_alt),
-            label: 'Notes',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.password_outlined),
-            selectedIcon: Icon(Icons.password),
-            label: 'Passwords',
+            icon: Icon(Icons.grid_view_rounded),
+            selectedIcon: Icon(Icons.grid_view_rounded),
+            label: 'Tools',
           ),
           NavigationDestination(
             icon: Icon(Icons.settings_outlined),
@@ -132,4 +146,3 @@ class _MainDashboardState extends State<MainDashboard> {
     );
   }
 }
-

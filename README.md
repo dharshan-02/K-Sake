@@ -36,6 +36,10 @@ Build an Android debug APK with `flutter build apk --debug`; the APK is written 
 
 The initial client implements encrypted local import, local search and folders, rename/delete, delete tombstones, image/PDF/text preview, account sign-in, streaming encrypted upload, cloud file browsing/download, and a client-encrypted recovery code for moving the vault key to another device. Folder changes stay local; password/session recovery and background sync are not implemented. Review `SECURITY.md` before handling real user data.
 
+For a local UI walkthrough, a debug build includes a device-local demo account. Use `demo@keepsake.local` with password `KeepsakeDemo!2026`, or choose **Open demo vault** on the sign-in screen. This demo does not contact the API or sync data and is excluded from release builds; do not use these credentials for real data. Cloud sign-in and registration need the API and PostgreSQL/S3 services running.
+
+Registration offers a **Cloud account** or **Device only** vault. Device-only files remain on this device. Cloud files are encrypted on-device before upload. Per-file states show whether a file is local, queued, uploading, synced, or needs attention. Interrupted or cancelled uploads keep the encrypted local copy and return to the queue; retry starts the upload again when connected. If the app closes mid-upload, the next unlock also returns stale `uploading` items to the retryable queue.
+
 ## Security status
 
 This is an implementation starter, not an audited security product. See `SECURITY.md` for threat boundaries, key recovery assumptions, and unfinished production controls.

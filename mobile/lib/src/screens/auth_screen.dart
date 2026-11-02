@@ -61,6 +61,10 @@ class _AuthScreenState extends State<AuthScreen>
   Future<void> _handleSignIn() async {
     final email = _signInEmail.text.trim().toLowerCase();
     final password = _signInPassword.text;
+    if (kDebugMode && email == _demoEmail && password == _demoPassword) {
+      await _openDemoVault();
+      return;
+    }
     if (email.isEmpty || password.isEmpty) {
       setState(() => _error = 'Enter your email and password to continue.');
       return;
@@ -92,6 +96,7 @@ class _AuthScreenState extends State<AuthScreen>
         email: email,
         password: password,
         lockType: AuthLockType.password,
+        cloudAccount: !_deviceOnly,
       );
       widget.onAuthSuccess();
     } catch (error) {
@@ -136,6 +141,7 @@ class _AuthScreenState extends State<AuthScreen>
         email: email,
         password: password,
         lockType: AuthLockType.password,
+        cloudAccount: !_deviceOnly,
       );
       widget.onAuthSuccess();
     } catch (error) {
@@ -164,6 +170,7 @@ class _AuthScreenState extends State<AuthScreen>
         email: _demoEmail,
         password: _demoPassword,
         lockType: AuthLockType.password,
+        cloudAccount: false,
       );
       widget.onAuthSuccess();
     } catch (error) {
@@ -292,14 +299,17 @@ class _AuthScreenState extends State<AuthScreen>
                             ),
                           ),
                           const SizedBox(width: 12),
-                          Text(
-                            'keepsake',
-                            style: theme.textTheme.titleLarge?.copyWith(
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: -0.5,
+                          Expanded(
+                            child: Text(
+                              'keepsake',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.titleLarge?.copyWith(
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: -0.5,
+                              ),
                             ),
                           ),
-                          const Spacer(),
                           IconButton(
                             tooltip: 'Server address',
                             onPressed: _configureServerUrl,
@@ -307,12 +317,12 @@ class _AuthScreenState extends State<AuthScreen>
                           ),
                         ],
                       ),
-                      SizedBox(height: constraints.maxHeight < 720 ? 25 : 42),
+                      SizedBox(height: constraints.maxHeight < 720 ? 14 : 28),
                       Text(
                         _isSignIn
                             ? 'Your files,\nwithin reach.'
                             : 'A calmer place\nfor your files.',
-                        style: theme.textTheme.headlineLarge?.copyWith(
+                        style: theme.textTheme.headlineMedium?.copyWith(
                           fontWeight: FontWeight.w800,
                           height: 1.06,
                           letterSpacing: -1.3,
@@ -328,7 +338,7 @@ class _AuthScreenState extends State<AuthScreen>
                           height: 1.45,
                         ),
                       ),
-                      const SizedBox(height: 26),
+                      const SizedBox(height: 18),
                       _buildAuthPanel(theme),
                       if (kDebugMode && _isSignIn) ...[
                         const SizedBox(height: 14),
@@ -504,12 +514,7 @@ class _AuthScreenState extends State<AuthScreen>
       const SizedBox(height: 14),
       _passwordInput(_confirmPassword, label: 'Confirm password'),
       const SizedBox(height: 9),
-      _deviceOnlySwitch(
-        theme,
-        copy: 'Create a device-only vault',
-        subtitle:
-            'No cloud account is created; you can still use files offline',
-      ),
+      _accountTypeChoice(theme),
       const SizedBox(height: 12),
       Container(
         padding: const EdgeInsets.all(12),
@@ -528,7 +533,9 @@ class _AuthScreenState extends State<AuthScreen>
             const SizedBox(width: 9),
             Expanded(
               child: Text(
-                'Unlock choices live in Settings. Your password is used for the first local unlock.',
+                _deviceOnly
+                    ? 'Device-only vault: no cloud account is created. Files stay on this device. You can choose an unlock method later in Settings.'
+                    : 'Cloud account: files stay on this device first and upload encrypted when you sync. You can choose an unlock method later in Settings.',
                 style: theme.textTheme.bodySmall?.copyWith(height: 1.35),
               ),
             ),
@@ -602,16 +609,56 @@ class _AuthScreenState extends State<AuthScreen>
     ThemeData theme, {
     required String copy,
     required String subtitle,
-  }) => SwitchListTile.adaptive(
-    contentPadding: EdgeInsets.zero,
-    dense: true,
-    title: Text(
-      copy,
-      style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+  }) => Material(
+    color: Colors.transparent,
+    child: SwitchListTile.adaptive(
+      contentPadding: EdgeInsets.zero,
+      dense: true,
+      title: Text(
+        copy,
+        style: theme.textTheme.bodyMedium?.copyWith(
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      subtitle: Text(subtitle, style: theme.textTheme.bodySmall),
+      value: _deviceOnly,
+      onChanged: _busy ? null : (value) => setState(() => _deviceOnly = value),
     ),
-    subtitle: Text(subtitle, style: theme.textTheme.bodySmall),
-    value: _deviceOnly,
-    onChanged: _busy ? null : (value) => setState(() => _deviceOnly = value),
+  );
+
+  Widget _accountTypeChoice(ThemeData theme) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      Text(
+        'Where should your vault live?',
+        style: theme.textTheme.titleSmall?.copyWith(
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      const SizedBox(height: 8),
+      Wrap(
+        spacing: 8,
+        runSpacing: 4,
+        children: [
+          ChoiceChip(
+            avatar: const Icon(Icons.cloud_outlined, size: 18),
+            label: const Text('Cloud account'),
+            selected: !_deviceOnly,
+            onSelected: _busy
+                ? null
+                : (_) => setState(() => _deviceOnly = false),
+          ),
+          ChoiceChip(
+            avatar: const Icon(Icons.phone_android_rounded, size: 18),
+            label: const Text('Device only'),
+            selected: _deviceOnly,
+            onSelected: _busy
+                ? null
+                : (_) => setState(() => _deviceOnly = true),
+          ),
+        ],
+      ),
+    ],
   );
 
   Widget _submitButton({
@@ -648,17 +695,18 @@ class _AuthScreenState extends State<AuthScreen>
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
+        Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             Icon(Icons.science_outlined, color: theme.colorScheme.secondary),
-            const SizedBox(width: 8),
             Text(
               'Demo access',
               style: theme.textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w700,
               ),
             ),
-            const Spacer(),
             const Chip(label: Text('DEBUG')),
           ],
         ),

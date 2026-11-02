@@ -78,8 +78,15 @@ class LocalVault {
       db.execute('ALTER TABLE files ADD COLUMN remote_updated_at TEXT');
     }
     if (!columns.contains('is_hidden')) {
-      db.execute('ALTER TABLE files ADD COLUMN is_hidden INTEGER NOT NULL DEFAULT 0');
+      db.execute(
+        'ALTER TABLE files ADD COLUMN is_hidden INTEGER NOT NULL DEFAULT 0',
+      );
     }
+    // If the process stopped mid-transfer, keep the encrypted local copy and
+    // make the file retryable instead of leaving it stuck as "uploading".
+    db.execute(
+      "UPDATE files SET sync_state = 'queued' WHERE sync_state = 'uploading'",
+    );
     db.execute('''CREATE TABLE IF NOT EXISTS notes (
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
@@ -108,7 +115,10 @@ class LocalVault {
     _db = db;
   }
 
-  Future<void> setMasterKeyFromCredentials(String email, String password) async {
+  Future<void> setMasterKeyFromCredentials(
+    String email,
+    String password,
+  ) async {
     _root = await getApplicationSupportDirectory();
     final kdf = Hkdf(hmac: Hmac.sha256(), outputLength: 32);
     final derived = await kdf.deriveKey(
