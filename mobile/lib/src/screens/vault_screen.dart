@@ -692,12 +692,12 @@ class _VaultScreenState extends State<VaultScreen> {
               _syncStatus(context, file),
               if (file.syncState == 'uploading')
                 Text(
-                    _uploadProgress.containsKey(file.id)
-                        ? '${((_uploadProgress[file.id] ?? 0) * 100).round()}%'
-                        : 'Preparing upload…',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                  _uploadProgress.containsKey(file.id)
+                      ? '${((_uploadProgress[file.id] ?? 0) * 100).round()}%'
+                      : 'Preparing upload…',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
             ],
           ),
           if (file.syncState == 'uploading') ...[
