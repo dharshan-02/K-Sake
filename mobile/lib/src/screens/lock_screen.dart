@@ -1,15 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:local_auth/local_auth.dart';
+
 import '../data/local_vault.dart';
 import '../data/auth_service.dart';
 import '../widgets/pattern_lock_view.dart';
 
 class LockScreen extends StatefulWidget {
-  const LockScreen({
-    super.key,
-    required this.vault,
-    required this.onUnlock,
-  });
+  const LockScreen({super.key, required this.vault, required this.onUnlock});
 
   final LocalVault vault;
   final void Function(bool isHiddenVault) onUnlock;
@@ -30,6 +27,7 @@ class _LockScreenState extends State<LockScreen> {
   int _secretTapCount = 0;
   DateTime? _lastTapTime;
   bool _busy = false;
+  bool _unlockCelebration = false;
   String? _error;
 
   @override
@@ -48,7 +46,9 @@ class _LockScreenState extends State<LockScreen> {
     final type = await _authService.getPreferredLockType();
     setState(() => _currentType = type);
     if (type == AuthLockType.biometric) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _authenticateBiometric());
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _authenticateBiometric(),
+      );
     }
   }
 
@@ -60,10 +60,13 @@ class _LockScreenState extends State<LockScreen> {
     });
 
     try {
-      final canCheck = await _localAuth.canCheckBiometrics || await _localAuth.isDeviceSupported();
+      final canCheck =
+          await _localAuth.canCheckBiometrics ||
+          await _localAuth.isDeviceSupported();
       if (!canCheck) {
         setState(() {
-          _error = 'Biometrics not available on this device. Use PIN or Password.';
+          _error =
+              'Biometrics not available on this device. Use PIN or Password.';
           _currentType = AuthLockType.pin;
         });
         return;
@@ -76,7 +79,10 @@ class _LockScreenState extends State<LockScreen> {
 
       if (authenticated) {
         await widget.vault.initialize();
-        widget.onUnlock(false);
+        if (!mounted) return;
+        setState(() => _unlockCelebration = true);
+        await Future<void>.delayed(const Duration(milliseconds: 850));
+        if (mounted) widget.onUnlock(false);
       } else {
         setState(() => _error = 'Authentication cancelled.');
       }
@@ -170,7 +176,9 @@ class _LockScreenState extends State<LockScreen> {
       _secretTapCount = 0;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('🕵️ Decoy / Hidden Safe mode activated. Enter decoy PIN or passcode.'),
+          content: Text(
+            '🕵️ Decoy / Hidden Safe mode activated. Enter decoy PIN or passcode.',
+          ),
           duration: Duration(seconds: 2),
         ),
       );
@@ -183,94 +191,178 @@ class _LockScreenState extends State<LockScreen> {
     final colorScheme = theme.colorScheme;
 
     return Scaffold(
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 380),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // Secret Tap Logo
-                  GestureDetector(
-                    onTap: _onLogoTap,
-                    child: Center(
-                      child: Container(
-                        padding: const EdgeInsets.all(18),
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: colorScheme.primary.withValues(alpha: 0.12),
-                          border: Border.all(
-                            color: colorScheme.primary.withValues(alpha: 0.3),
-                            width: 2,
+      body: Stack(
+        children: [
+          SafeArea(
+            child: Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 20,
+                ),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 380),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // Secret Tap Logo
+                      GestureDetector(
+                        onTap: _onLogoTap,
+                        child: Center(
+                          child: Container(
+                            padding: const EdgeInsets.all(18),
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: colorScheme.primary.withValues(
+                                alpha: 0.12,
+                              ),
+                              border: Border.all(
+                                color: colorScheme.primary.withValues(
+                                  alpha: 0.3,
+                                ),
+                                width: 2,
+                              ),
+                            ),
+                            child: Icon(
+                              Icons.lock_rounded,
+                              size: 44,
+                              color: colorScheme.primary,
+                            ),
                           ),
                         ),
-                        child: Icon(
-                          Icons.lock_rounded,
-                          size: 44,
-                          color: colorScheme.primary,
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Vault Locked',
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.headlineSmall?.copyWith(
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Vault Locked',
-                    textAlign: TextAlign.center,
-                    style: theme.textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Authenticate to access your encrypted records',
-                    textAlign: TextAlign.center,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.hintColor,
-                    ),
-                  ),
-                  const SizedBox(height: 20),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Authenticate to access your encrypted records',
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.hintColor,
+                        ),
+                      ),
+                      const SizedBox(height: 20),
 
-                  // Mode Selector Row
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      _buildModeIcon(Icons.dialpad, AuthLockType.pin, 'PIN'),
-                      const SizedBox(width: 12),
-                      _buildModeIcon(Icons.gesture, AuthLockType.pattern, 'Pattern'),
-                      const SizedBox(width: 12),
-                      _buildModeIcon(Icons.fingerprint, AuthLockType.biometric, 'Biometrics'),
-                      const SizedBox(width: 12),
-                      _buildModeIcon(Icons.password, AuthLockType.password, 'Password'),
+                      // Mode Selector Row
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          _buildModeIcon(
+                            Icons.dialpad,
+                            AuthLockType.pin,
+                            'PIN',
+                          ),
+                          const SizedBox(width: 12),
+                          _buildModeIcon(
+                            Icons.gesture,
+                            AuthLockType.pattern,
+                            'Pattern',
+                          ),
+                          const SizedBox(width: 12),
+                          _buildModeIcon(
+                            Icons.fingerprint,
+                            AuthLockType.biometric,
+                            'Biometrics',
+                          ),
+                          const SizedBox(width: 12),
+                          _buildModeIcon(
+                            Icons.password,
+                            AuthLockType.password,
+                            'Password',
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 20),
+
+                      if (_error != null) ...[
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: colorScheme.error.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            _error!,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: colorScheme.error,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
+
+                      // Unlock Body depending on mode
+                      _buildLockBody(theme),
                     ],
                   ),
-                  const SizedBox(height: 20),
-
-                  if (_error != null) ...[
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: colorScheme.error.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        _error!,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: colorScheme.error, fontSize: 13),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                  ],
-
-                  // Unlock Body depending on mode
-                  _buildLockBody(theme),
-                ],
+                ),
               ),
             ),
           ),
-        ),
+          if (_unlockCelebration)
+            Positioned.fill(
+              child: ColoredBox(
+                color: colorScheme.surface,
+                child: Center(
+                  child: TweenAnimationBuilder<double>(
+                    tween: Tween(begin: 0.72, end: 1),
+                    duration: MediaQuery.disableAnimationsOf(context)
+                        ? Duration.zero
+                        : const Duration(milliseconds: 520),
+                    curve: Curves.easeOutBack,
+                    builder: (context, scale, child) => Opacity(
+                      opacity: scale.clamp(0, 1),
+                      child: Transform.scale(scale: scale, child: child),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 104,
+                          height: 104,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: colorScheme.primaryContainer,
+                          ),
+                          child: Icon(
+                            Icons.verified_rounded,
+                            size: 58,
+                            color: colorScheme.primary,
+                          ),
+                        ),
+                        const SizedBox(height: 22),
+                        Text(
+                          'Vault unlocked',
+                          style: theme.textTheme.headlineSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Your private library is ready.',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -298,7 +390,9 @@ class _LockScreenState extends State<LockScreen> {
             color: isSelected ? colorScheme.primary : colorScheme.surface,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: isSelected ? colorScheme.primary : Theme.of(context).dividerColor.withValues(alpha: 0.2),
+              color: isSelected
+                  ? colorScheme.primary
+                  : Theme.of(context).dividerColor.withValues(alpha: 0.2),
             ),
           ),
           child: Icon(
@@ -405,13 +499,13 @@ class _LockScreenState extends State<LockScreen> {
   Widget _buildPatternBody(ThemeData theme) {
     return Column(
       children: [
-        const Text('Draw your secret pattern to unlock', style: TextStyle(fontSize: 13)),
+        const Text(
+          'Draw your secret pattern to unlock',
+          style: TextStyle(fontSize: 13),
+        ),
         const SizedBox(height: 16),
         Center(
-          child: PatternLockView(
-            dimension: 260,
-            onComplete: _checkPattern,
-          ),
+          child: PatternLockView(dimension: 260, onComplete: _checkPattern),
         ),
       ],
     );
@@ -421,14 +515,12 @@ class _LockScreenState extends State<LockScreen> {
     return Column(
       children: [
         const SizedBox(height: 20),
-        Icon(
-          Icons.fingerprint,
-          size: 72,
-          color: theme.colorScheme.primary,
-        ),
+        Icon(Icons.fingerprint, size: 72, color: theme.colorScheme.primary),
         const SizedBox(height: 20),
         Text(
-          _busy ? 'Scanning biometrics…' : 'Touch fingerprint sensor or face camera',
+          _busy
+              ? 'Scanning biometrics…'
+              : 'Touch fingerprint sensor or face camera',
           style: theme.textTheme.bodyMedium,
         ),
         const SizedBox(height: 24),
@@ -453,10 +545,15 @@ class _LockScreenState extends State<LockScreen> {
             labelText: 'Master Password',
             prefixIcon: const Icon(Icons.lock_outline),
             suffixIcon: IconButton(
-              icon: Icon(_obscurePassword ? Icons.visibility_off : Icons.visibility),
-              onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+              icon: Icon(
+                _obscurePassword ? Icons.visibility_off : Icons.visibility,
+              ),
+              onPressed: () =>
+                  setState(() => _obscurePassword = !_obscurePassword),
             ),
-            border: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
+            border: const OutlineInputBorder(
+              borderRadius: BorderRadius.all(Radius.circular(12)),
+            ),
           ),
         ),
         const SizedBox(height: 20),
@@ -466,11 +563,12 @@ class _LockScreenState extends State<LockScreen> {
           label: const Text('Unlock with Password'),
           style: FilledButton.styleFrom(
             padding: const EdgeInsets.symmetric(vertical: 14),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
           ),
         ),
       ],
     );
   }
 }
-
