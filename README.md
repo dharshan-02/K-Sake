@@ -22,7 +22,7 @@ npm run start:dev
 
 The API defaults to `http://localhost:3000`. Configure the mobile API URL for your simulator/device; a physical device needs a reachable host address and HTTPS outside local development.
 
-## Start the mobile app
+## Start the mobile app 
 
 Install Flutter 3.47.5 stable and Android Studio with the Android SDK. Native Android and iOS runner folders are included. From `mobile/`:
 
