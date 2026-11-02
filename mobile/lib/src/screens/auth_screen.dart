@@ -486,8 +486,8 @@ class _AuthScreenState extends State<AuthScreen>
       const SizedBox(height: 9),
       _deviceOnlySwitch(
         theme,
-        copy: 'Stay on this device',
-        subtitle: 'Skip cloud sign-in for a saved local account',
+        copy: 'Use saved local account',
+        subtitle: 'Do not contact the cloud server for sign-in',
       ),
       const SizedBox(height: 14),
       _submitButton(
@@ -534,7 +534,7 @@ class _AuthScreenState extends State<AuthScreen>
             Expanded(
               child: Text(
                 _deviceOnly
-                    ? 'Device-only vault: no cloud account is created. Files stay on this device. You can choose an unlock method later in Settings.'
+                    ? 'Device-only vault: your sign-in stays on this device and no cloud account is created. You can choose an unlock method later in Settings.'
                     : 'Cloud account: files stay on this device first and upload encrypted when you sync. You can choose an unlock method later in Settings.',
                 style: theme.textTheme.bodySmall?.copyWith(height: 1.35),
               ),

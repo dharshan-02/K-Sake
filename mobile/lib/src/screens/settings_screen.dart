@@ -160,7 +160,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       builder: (ctx) => AlertDialog(
         title: const Text('Sign out of account?'),
         content: const Text(
-          'Your local encrypted files will remain safe on this phone. You can sign in anytime to re-enable cloud sync.',
+          'Files remain encrypted on this phone. Signing out pauses cloud sync.',
         ),
         actions: [
           TextButton(
@@ -641,7 +641,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     _hasSession && _userEmail != null && _userEmail!.isNotEmpty
                         ? _userEmail!
                         : _hasSession
-                        ? 'Cloud account connected'
+                        ? 'Cloud account · signed in'
                         : _accountMode == 'cloud'
                         ? 'Cloud account · signed out'
                         : 'Device-only vault',
@@ -649,10 +649,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   subtitle: Text(
                     _hasSession
-                        ? 'Cloud account connected. Sync encrypted file copies while online.'
+                        ? 'Signed in. Encrypted copies sync when online; other devices need your recovery code.'
                         : _accountMode == 'cloud'
                         ? 'Your local files remain here. Sign in to sync again.'
                         : 'No cloud copy is configured. Files stay on this device.',
+                  ),
+                ),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  child: Text(
+                    'File contents are encrypted before upload. File names, sizes, and sync timestamps remain visible to the cloud service.',
+                    style: TextStyle(fontSize: 12),
                   ),
                 ),
                 const Divider(height: 1),
@@ -723,7 +730,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       style: TextStyle(color: Colors.red),
                     ),
                     subtitle: const Text(
-                      'Files will remain safely encrypted on this phone',
+                      'Files remain encrypted on this phone; signing out pauses cloud sync',
                     ),
                     onTap: _signOutAccount,
                   ),

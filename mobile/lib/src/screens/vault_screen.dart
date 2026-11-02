@@ -321,7 +321,7 @@ class _VaultScreenState extends State<VaultScreen> {
                     style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                   subtitle: const Text(
-                    'Linked Account · Cross-device sync active',
+                    'Cloud account signed in · sync runs when online',
                   ),
                 ),
               ListTile(
@@ -523,7 +523,7 @@ class _VaultScreenState extends State<VaultScreen> {
               const SizedBox(height: 4),
               Text(
                 _hasCloudSession
-                    ? 'Encrypted on this device · Cloud account connected'
+                    ? 'Encrypted on this device · Cloud account signed in'
                     : 'Encrypted on this device · Sync when you connect an account',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -657,6 +657,7 @@ class _VaultScreenState extends State<VaultScreen> {
 
   Widget _fileCard(BuildContext context, VaultFile file) => Card(
     child: ListTile(
+      isThreeLine: file.syncState == 'uploading',
       onTap: () => Navigator.of(context).push(
         MaterialPageRoute<void>(
           builder: (_) => FilePreviewScreen(vault: widget.vault, file: file),
@@ -677,23 +678,26 @@ class _VaultScreenState extends State<VaultScreen> {
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('${_size(file.size)} · ${file.folderName ?? 'No folder'}'),
+          Text(
+            '${_size(file.size)} · ${file.folderName ?? 'No folder'}',
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
           const SizedBox(height: 6),
-          Row(
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               _syncStatus(context, file),
-              if (file.syncState == 'uploading') ...[
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
+              if (file.syncState == 'uploading')
+                Text(
                     _uploadProgress.containsKey(file.id)
                         ? '${((_uploadProgress[file.id] ?? 0) * 100).round()}%'
                         : 'Preparing upload…',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
-                ),
-              ],
             ],
           ),
           if (file.syncState == 'uploading') ...[
