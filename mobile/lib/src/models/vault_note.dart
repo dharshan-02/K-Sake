@@ -40,3 +40,4 @@ class VaultNote {
         updatedAt: updatedAt ?? this.updatedAt,
       );
 }
+

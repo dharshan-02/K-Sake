@@ -13,8 +13,9 @@ import 'recovery_screen.dart';
 import '../models/vault_file.dart';
 
 class VaultScreen extends StatefulWidget {
-  const VaultScreen({super.key, required this.vault});
+  const VaultScreen({super.key, required this.vault, this.isHiddenVault = false});
   final LocalVault vault;
+  final bool isHiddenVault;
 
   @override
   State<VaultScreen> createState() => _VaultScreenState();
@@ -48,7 +49,7 @@ class _VaultScreenState extends State<VaultScreen> {
   }
 
   Future<void> _reload() async {
-    final files = await widget.vault.listFiles();
+    final files = await widget.vault.listFiles(isHidden: widget.isHiddenVault);
     if (mounted) {
       setState(() {
         _files = files;
@@ -78,7 +79,12 @@ class _VaultScreenState extends State<VaultScreen> {
         'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         _ => 'application/octet-stream',
       };
-      await widget.vault.importFile(source, file.name, mime);
+      await widget.vault.importFile(
+        source,
+        file.name,
+        mime,
+        isHidden: widget.isHiddenVault,
+      );
       imported++;
     }
     await _reload();
@@ -88,6 +94,10 @@ class _VaultScreenState extends State<VaultScreen> {
             ? 'No accessible files were imported.'
             : '$imported file${imported == 1 ? '' : 's'} encrypted on this device.',
       );
+    }
+    // Auto-sync newly imported files with cloud if linked
+    if (imported > 0 && await _api.hasSession) {
+      _sync(silent: true);
     }
   }
 
@@ -180,6 +190,25 @@ class _VaultScreenState extends State<VaultScreen> {
     await _reload();
   }
 
+  Future<void> _uploadFile(VaultFile file) async {
+    if (!await _api.hasSession) {
+      _account();
+      return;
+    }
+    setState(() => _message = 'Uploading "${file.name}" to cloud…');
+    try {
+      await _api.uploadSingleFile(file);
+      await _reload();
+      if (mounted) {
+        setState(() => _message = 'Uploaded "${file.name}" to cloud.');
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _message = 'Upload failed: $e');
+      }
+    }
+  }
+
   Future<void> _resolveConflict(VaultFile file) async {
     final keepLocal = await showDialog<bool>(
       context: context,
@@ -215,6 +244,7 @@ class _VaultScreenState extends State<VaultScreen> {
 
   Future<void> _account() async {
     final hasSession = await _api.hasSession;
+    final userEmail = await _api.userEmail;
     if (!mounted) return;
     if (hasSession) {
       final action = await showModalBottomSheet<String>(
@@ -222,14 +252,22 @@ class _VaultScreenState extends State<VaultScreen> {
         builder: (context) => SafeArea(
           child: Wrap(
             children: [
+              if (userEmail != null)
+                ListTile(
+                  leading: const Icon(Icons.account_circle, color: Colors.blue),
+                  title: Text(userEmail, style: const TextStyle(fontWeight: FontWeight.bold)),
+                  subtitle: const Text('Linked Account · Cross-device sync active'),
+                ),
               ListTile(
                 leading: const Icon(Icons.sync),
-                title: const Text('Sync queued files'),
+                title: const Text('Sync with Cloud (Upload & Download)'),
+                subtitle: const Text('Upload new files and download from other phones'),
                 onTap: () => Navigator.pop(context, 'sync'),
               ),
               ListTile(
                 leading: const Icon(Icons.cloud_outlined),
-                title: const Text('Browse cloud files'),
+                title: const Text('Browse Cloud Vault Files'),
+                subtitle: const Text('View and download files in this account'),
                 onTap: () => Navigator.pop(context, 'cloud'),
               ),
               ListTile(
@@ -238,8 +276,8 @@ class _VaultScreenState extends State<VaultScreen> {
                 onTap: () => Navigator.pop(context, 'recovery'),
               ),
               ListTile(
-                leading: const Icon(Icons.logout),
-                title: const Text('Sign out'),
+                leading: const Icon(Icons.logout, color: Colors.red),
+                title: const Text('Sign out', style: TextStyle(color: Colors.red)),
                 onTap: () => Navigator.pop(context, 'signout'),
               ),
             ],
@@ -250,8 +288,7 @@ class _VaultScreenState extends State<VaultScreen> {
         await _api.signOut();
         if (mounted) {
           setState(
-            () =>
-                _message = 'Signed out. Files remain available on this device.',
+            () => _message = 'Signed out. Files remain available on this device.',
           );
         }
       }
@@ -286,10 +323,12 @@ class _VaultScreenState extends State<VaultScreen> {
       builder: (context) => const _AccountDialog(),
     );
     if (result == 'authenticated' && mounted) {
-      setState(
-        () => _message =
-            'Account connected. Use the cloud button to sync encrypted files.',
-      );
+      await _sync();
+      if (mounted) {
+        setState(
+          () => _message = 'Account connected. Synced with cloud.',
+        );
+      }
     }
   }
 
@@ -297,20 +336,25 @@ class _VaultScreenState extends State<VaultScreen> {
     if (_syncing) return;
     _syncing = true;
     if (!silent && mounted) {
-      setState(() => _message = 'Syncing encrypted files…');
+      setState(() => _message = 'Syncing encrypted files with cloud…');
     }
     try {
-      final count = await _api.syncQueued();
+      final summary = await _api.syncAll(downloadMissing: true);
       await _reload();
       if (mounted && !silent) {
+        final parts = <String>[];
+        if (summary.uploaded > 0) parts.add('${summary.uploaded} uploaded');
+        if (summary.downloaded > 0) parts.add('${summary.downloaded} downloaded');
         setState(
-          () => _message = '$count file${count == 1 ? '' : 's'} synced.',
+          () => _message = parts.isEmpty
+              ? 'Vault up to date (${summary.totalCloud} in cloud)'
+              : 'Synced: ${parts.join(', ')}',
         );
       }
     } catch (_) {
       if (mounted && !silent) {
         setState(
-          () => _message = 'Could not sync. Your local files are safe; try again when online.',
+          () => _message = 'Could not sync with server. Local vault is safe.',
         );
       }
     } finally {
@@ -337,12 +381,26 @@ class _VaultScreenState extends State<VaultScreen> {
         .toList();
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Keepsake'),
+        title: Text(widget.isHiddenVault ? 'Decoy / Hidden Safe' : 'Keepsake Vault'),
         actions: [
           IconButton(
+            onPressed: () => _sync(silent: false),
+            tooltip: 'Sync Cloud Files',
+            icon: const Icon(Icons.sync),
+          ),
+          IconButton(
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => CloudFilesScreen(vault: widget.vault, api: _api),
+              ),
+            ),
+            tooltip: 'Cloud Vault',
+            icon: const Icon(Icons.cloud_outlined),
+          ),
+          IconButton(
             onPressed: _account,
-            tooltip: 'Account and sync',
-            icon: const Icon(Icons.cloud_sync_outlined),
+            tooltip: 'Account Settings',
+            icon: const Icon(Icons.account_circle_outlined),
           ),
           IconButton(
             onPressed: _import,
@@ -358,15 +416,15 @@ class _VaultScreenState extends State<VaultScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Your private space',
+                widget.isHiddenVault ? 'Hidden Safe Vault' : 'Your private space',
                 style: Theme.of(context).textTheme.headlineMedium
                     ?.copyWith(fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 6),
               const Text(
-                'Encrypted on this device. Ready to sync when online.',
+                'Encrypted client-side. Multi-device cloud sync enabled.',
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
               TextField(
                 decoration: InputDecoration(
                   prefixIcon: const Icon(Icons.search),
@@ -384,7 +442,10 @@ class _VaultScreenState extends State<VaultScreen> {
                   padding: const EdgeInsets.only(top: 10),
                   child: Text(
                     _message!,
-                    style: Theme.of(context).textTheme.bodySmall,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.primary,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               const SizedBox(height: 16),
@@ -427,11 +488,14 @@ class _VaultScreenState extends State<VaultScreen> {
                     ? const Center(child: CircularProgressIndicator())
                     : visible.isEmpty
                     ? _empty(context)
-                    : ListView.separated(
-                        itemCount: visible.length,
-                        separatorBuilder: (_, _) => const SizedBox(height: 8),
-                        itemBuilder: (context, index) =>
-                            _fileCard(context, visible[index]),
+                    : RefreshIndicator(
+                        onRefresh: () => _sync(silent: false),
+                        child: ListView.separated(
+                          itemCount: visible.length,
+                          separatorBuilder: (_, _) => const SizedBox(height: 8),
+                          itemBuilder: (context, index) =>
+                              _fileCard(context, visible[index]),
+                        ),
                       ),
               ),
             ],
@@ -464,10 +528,25 @@ class _VaultScreenState extends State<VaultScreen> {
         ),
         if (_query.isEmpty) ...[
           const SizedBox(height: 16),
-          OutlinedButton.icon(
-            onPressed: _import,
-            icon: const Icon(Icons.add),
-            label: const Text('Choose files'),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              OutlinedButton.icon(
+                onPressed: _import,
+                icon: const Icon(Icons.add),
+                label: const Text('Add files'),
+              ),
+              const SizedBox(width: 12),
+              FilledButton.tonalIcon(
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => CloudFilesScreen(vault: widget.vault, api: _api),
+                  ),
+                ),
+                icon: const Icon(Icons.cloud_download_outlined),
+                label: const Text('Cloud Files'),
+              ),
+            ],
           ),
         ],
       ],
@@ -493,26 +572,75 @@ class _VaultScreenState extends State<VaultScreen> {
         ),
       ),
       title: Text(file.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-      subtitle: Text(
-        '${_size(file.size)} · ${switch (file.syncState) {
-          'synced' => 'Synced',
-          'uploading' => 'Uploading',
-          'failed' => 'Sync failed · retry from cloud menu',
-          'conflict' => 'Name conflict · review before syncing',
-          _ => 'On device · Upload queued',
-        }}',
+      subtitle: Row(
+        children: [
+          Text(_size(file.size)),
+          const Text(' · '),
+          Icon(
+            switch (file.syncState) {
+              'synced' => Icons.cloud_done_rounded,
+              'uploading' => Icons.cloud_upload_outlined,
+              'failed' => Icons.cloud_off_rounded,
+              'conflict' => Icons.warning_amber_rounded,
+              _ => Icons.cloud_queue_rounded,
+            },
+            size: 14,
+            color: switch (file.syncState) {
+              'synced' => Colors.green,
+              'uploading' => Colors.blue,
+              'failed' => Colors.red,
+              'conflict' => Colors.orange,
+              _ => Colors.grey,
+            },
+          ),
+          const SizedBox(width: 4),
+          Expanded(
+            child: Text(
+              switch (file.syncState) {
+                'synced' => 'Synced',
+                'uploading' => 'Uploading…',
+                'failed' => 'Sync failed',
+                'conflict' => 'Conflict',
+                _ => 'Local only',
+              },
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12),
+            ),
+          ),
+        ],
       ),
       trailing: PopupMenuButton<String>(
         tooltip: 'File actions',
-        onSelected: (value) {
+        onSelected: (value) async {
+          if (value == 'upload') _uploadFile(file);
           if (value == 'delete') _delete(file);
           if (value == 'rename') _rename(file);
           if (value == 'folder') _moveToFolder(file);
           if (value == 'resolve') _resolveConflict(file);
+          if (value == 'toggle_hidden') {
+            await widget.vault.toggleFileHidden(file.id, !file.isHidden);
+            await _reload();
+          }
         },
         itemBuilder: (_) => [
+          if (file.syncState != 'synced')
+            const PopupMenuItem(
+              value: 'upload',
+              child: Row(
+                children: [
+                  Icon(Icons.cloud_upload_outlined, size: 18),
+                  SizedBox(width: 8),
+                  Text('Upload to Cloud'),
+                ],
+              ),
+            ),
           const PopupMenuItem(value: 'rename', child: Text('Rename')),
           const PopupMenuItem(value: 'folder', child: Text('Move to folder')),
+          PopupMenuItem(
+            value: 'toggle_hidden',
+            child: Text(file.isHidden ? 'Move to normal vault' : 'Move to hidden safe'),
+          ),
           if (file.syncState == 'conflict')
             const PopupMenuItem(
               value: 'resolve',
@@ -557,11 +685,14 @@ class _AccountDialogState extends State<_AccountDialog> {
       _error = null;
     });
     try {
+      final email = _email.text.trim().toLowerCase();
+      final password = _password.text;
       await ApiClient(LocalVault()).authenticate(
-        _email.text.trim(),
-        _password.text,
+        email,
+        password,
         createAccount: _create,
       );
+      await LocalVault().setMasterKeyFromCredentials(email, password);
       if (mounted) Navigator.pop(context, 'authenticated');
     } catch (e) {
       if (mounted) {
@@ -574,27 +705,29 @@ class _AccountDialogState extends State<_AccountDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: Text(_create ? 'Create account' : 'Sign in to sync'),
+    title: Text(_create ? 'Create Account' : 'Link Email & Sync'),
     content: SingleChildScrollView(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           const Text(
-            'Files are encrypted on this device before upload. Account recovery is not implemented yet; keep another copy of important files.',
+            'Files are encrypted client-side. Signing into the same email on another device gives you instant access to all uploaded files.',
+            style: TextStyle(fontSize: 13),
           ),
           const SizedBox(height: 16),
           TextField(
             controller: _email,
             keyboardType: TextInputType.emailAddress,
             autofillHints: const [AutofillHints.email],
-            decoration: const InputDecoration(labelText: 'Email'),
+            decoration: const InputDecoration(labelText: 'Email Address'),
           ),
+          const SizedBox(height: 12),
           TextField(
             controller: _password,
             obscureText: true,
             autofillHints: const [AutofillHints.password],
             decoration: const InputDecoration(
-              labelText: 'Password (12+ characters)',
+              labelText: 'Master Password',
             ),
           ),
           if (_error != null)
@@ -605,6 +738,7 @@ class _AccountDialogState extends State<_AccountDialog> {
                 style: TextStyle(color: Theme.of(context).colorScheme.error),
               ),
             ),
+          const SizedBox(height: 8),
           TextButton(
             onPressed: _busy ? null : () => setState(() => _create = !_create),
             child: Text(

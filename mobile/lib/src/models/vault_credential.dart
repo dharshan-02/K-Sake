@@ -48,3 +48,4 @@ class VaultCredential {
         updatedAt: updatedAt ?? this.updatedAt,
       );
 }
+

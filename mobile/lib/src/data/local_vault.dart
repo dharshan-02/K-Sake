@@ -108,6 +108,31 @@ class LocalVault {
     _db = db;
   }
 
+  Future<void> setMasterKeyFromCredentials(String email, String password) async {
+    _root = await getApplicationSupportDirectory();
+    final kdf = Hkdf(hmac: Hmac.sha256(), outputLength: 32);
+    final derived = await kdf.deriveKey(
+      secretKey: SecretKey(utf8.encode(password)),
+      nonce: const [],
+      info: utf8.encode('keepsake/master-key/v2/${email.trim().toLowerCase()}'),
+    );
+    final bytes = await derived.extractBytes();
+    final newKeyEncoded = base64UrlEncode(bytes);
+    final currentKey = await _secureStore.read(key: _keyName);
+
+    if (currentKey != newKeyEncoded) {
+      _db?.close();
+      _db = null;
+      final dbFile = File(p.join(_root.path, 'vault.sqlite'));
+      for (final suffix in ['', '-wal', '-shm']) {
+        final f = File('${dbFile.path}$suffix');
+        if (await f.exists()) await f.delete();
+      }
+      await _secureStore.write(key: _keyName, value: newKeyEncoded);
+    }
+    await initialize();
+  }
+
   Future<List<VaultFile>> listFiles({bool isHidden = false}) async {
     final rows = _db!.select(
       'SELECT * FROM files WHERE is_hidden = ? ORDER BY created_at DESC',
@@ -289,24 +314,39 @@ class LocalVault {
     required DateTime remoteUpdatedAt,
     required String sourcePath,
   }) async {
-    if (await findFile(id) != null) return;
     final destination = File(p.join(_root.path, 'vault_files', '$id.enc'));
     await File(sourcePath).copy(destination.path);
-    _db!.execute(
-      'INSERT INTO files (id,name,mime_type,size,created_at,local_path,sync_state,folder_name,remote_updated_at,is_hidden) VALUES (?,?,?,?,?,?,?,?,?,?)',
-      [
-        id,
-        name,
-        mimeType,
-        size,
-        createdAt.toUtc().toIso8601String(),
-        destination.path,
-        'synced',
-        null,
-        remoteUpdatedAt.toUtc().toIso8601String(),
-        0,
-      ],
-    );
+    final existing = await findFile(id);
+    if (existing != null) {
+      _db!.execute(
+        'UPDATE files SET name = ?, mime_type = ?, size = ?, local_path = ?, sync_state = ?, remote_updated_at = ? WHERE id = ?',
+        [
+          name,
+          mimeType,
+          size,
+          destination.path,
+          'synced',
+          remoteUpdatedAt.toUtc().toIso8601String(),
+          id,
+        ],
+      );
+    } else {
+      _db!.execute(
+        'INSERT INTO files (id,name,mime_type,size,created_at,local_path,sync_state,folder_name,remote_updated_at,is_hidden) VALUES (?,?,?,?,?,?,?,?,?,?)',
+        [
+          id,
+          name,
+          mimeType,
+          size,
+          createdAt.toUtc().toIso8601String(),
+          destination.path,
+          'synced',
+          null,
+          remoteUpdatedAt.toUtc().toIso8601String(),
+          0,
+        ],
+      );
+    }
   }
 
   // --- Notes CRUD ---
@@ -453,11 +493,6 @@ class LocalVault {
       'noteCount': noteRows.first['count'] as int,
       'credentialCount': credRows.first['count'] as int,
     };
-  }
-        null,
-        remoteUpdatedAt.toUtc().toIso8601String(),
-      ],
-    );
   }
 
   Future<File> decryptToTemporaryFile(VaultFile file) async {

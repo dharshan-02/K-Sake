@@ -140,3 +140,4 @@ class AppThemeController extends ChangeNotifier {
     }
   }
 }
+

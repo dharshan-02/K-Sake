@@ -1,88 +1,106 @@
 import 'package:flutter/material.dart';
-import 'package:local_auth/local_auth.dart';
 import 'data/local_vault.dart';
-import 'screens/vault_screen.dart';
+import 'data/auth_service.dart';
+import 'models/theme_settings.dart';
+import 'screens/auth_screen.dart';
+import 'screens/lock_screen.dart';
+import 'screens/main_dashboard.dart';
 
 class KeepsakeApp extends StatelessWidget {
   const KeepsakeApp({super.key, required this.vault});
   final LocalVault vault;
 
   @override
-  Widget build(BuildContext context) => MaterialApp(
+  Widget build(BuildContext context) {
+    final themeCtrl = AppThemeController.instance;
+
+    return ListenableBuilder(
+      listenable: themeCtrl,
+      builder: (context, _) => MaterialApp(
         title: 'Keepsake',
         debugShowCheckedModeBanner: false,
-        theme: ThemeData(
-          useMaterial3: true,
-          colorScheme: ColorScheme.fromSeed(
-            seedColor: const Color(0xFF315C54),
-            surface: const Color(0xFFF7F8F5),
-          ),
-          scaffoldBackgroundColor: const Color(0xFFF7F8F5),
-          appBarTheme: const AppBarTheme(backgroundColor: Color(0xFFF7F8F5)),
-          cardTheme: CardThemeData(
-            color: Colors.white,
-            elevation: 0,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          ),
-        ),
-        home: UnlockGate(vault: vault),
-      );
+        theme: themeCtrl.themeData,
+        home: AppRootFlow(vault: vault),
+      ),
+    );
+  }
 }
 
-class UnlockGate extends StatefulWidget {
-  const UnlockGate({super.key, required this.vault});
+enum _FlowState {
+  loading,
+  auth,
+  locked,
+  unlocked,
+}
+
+class AppRootFlow extends StatefulWidget {
+  const AppRootFlow({super.key, required this.vault});
   final LocalVault vault;
 
   @override
-  State<UnlockGate> createState() => _UnlockGateState();
+  State<AppRootFlow> createState() => _AppRootFlowState();
 }
 
-class _UnlockGateState extends State<UnlockGate> {
-  bool _busy = false;
-  bool _unlocked = false;
-  String? _error;
-  final _auth = LocalAuthentication();
+class _AppRootFlowState extends State<AppRootFlow> {
+  final _authService = AuthService();
+  _FlowState _state = _FlowState.loading;
+  bool _isHiddenVault = false;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _unlock());
+    _checkInitialState();
   }
 
-  Future<void> _unlock() async {
-    if (_busy) return;
-    setState(() { _busy = true; _error = null; });
-    try {
-      final supported = await _auth.isDeviceSupported();
-      final authenticated = supported && await _auth.authenticate(
-        localizedReason: 'Unlock your private file vault',
-        persistAcrossBackgrounding: true,
-      );
-      if (!authenticated) throw StateError('Authentication was not completed.');
-      await widget.vault.initialize();
-      if (mounted) setState(() => _unlocked = true);
-    } catch (_) {
-      if (mounted) setState(() => _error = 'Authenticate with your device to open Keepsake.');
-    } finally {
-      if (mounted) setState(() => _busy = false);
+  Future<void> _checkInitialState() async {
+    final isRegistered = await _authService.isRegistered();
+    if (mounted) {
+      setState(() {
+        _state = isRegistered ? _FlowState.locked : _FlowState.auth;
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_unlocked) return VaultScreen(vault: widget.vault);
-    return Scaffold(body: Center(child: Padding(
-      padding: const EdgeInsets.all(32),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        const Icon(Icons.shield_moon_outlined, size: 56),
-        const SizedBox(height: 20),
-        Text('Your files, kept private', style: Theme.of(context).textTheme.headlineSmall),
-        const SizedBox(height: 8),
-        const Text('Unlock with your device biometrics or passcode.'),
-        if (_error != null) ...[const SizedBox(height: 16), Text(_error!, textAlign: TextAlign.center)],
-        const SizedBox(height: 24),
-        FilledButton.icon(onPressed: _busy ? null : _unlock, icon: const Icon(Icons.lock_open), label: Text(_busy ? 'Waiting for device…' : 'Unlock vault')),
-      ]),
-    )));
+    switch (_state) {
+      case _FlowState.loading:
+        return const Scaffold(
+          body: Center(child: CircularProgressIndicator()),
+        );
+
+      case _FlowState.auth:
+        return AuthScreen(
+          vault: widget.vault,
+          onAuthSuccess: () {
+            setState(() {
+              _state = _FlowState.unlocked;
+              _isHiddenVault = false;
+            });
+          },
+        );
+
+      case _FlowState.locked:
+        return LockScreen(
+          vault: widget.vault,
+          onUnlock: (isHidden) {
+            setState(() {
+              _isHiddenVault = isHidden;
+              _state = _FlowState.unlocked;
+            });
+          },
+        );
+
+      case _FlowState.unlocked:
+        return MainDashboard(
+          vault: widget.vault,
+          isHiddenVault: _isHiddenVault,
+          onLock: () {
+            setState(() {
+              _state = _FlowState.locked;
+            });
+          },
+        );
+    }
   }
 }
