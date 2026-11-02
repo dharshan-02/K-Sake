@@ -1,0 +1,42 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String     @id @default(uuid()) @db.Uuid
+  email        String     @unique @db.VarChar(254)
+  passwordHash String
+  createdAt    DateTime   @default(now())
+  files        VaultFile[]
+  recovery     RecoveryEnvelope?
+}
+
+model RecoveryEnvelope {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @unique @db.Uuid
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  nonce      String   @db.VarChar(32)
+  ciphertext String   @db.VarChar(256)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model VaultFile {
+  id          String   @id @default(uuid()) @db.Uuid
+  ownerId     String   @db.Uuid
+  owner       User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  objectKey   String   @unique
+  name        String   @db.VarChar(255)
+  mimeType    String   @db.VarChar(160)
+  size        BigInt
+  status      String   @default("pending") @db.VarChar(16)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([ownerId, createdAt])
+}

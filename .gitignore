@@ -1,0 +1,23 @@
+# Environment and secrets
+**/.env
+**/.env.*
+!**/.env.example
+
+# Flutter / Dart
+mobile/.dart_tool/
+mobile/.packages
+mobile/build/
+mobile/coverage/
+mobile/*.iml
+*.apk
+**/*.apk
+
+# Node / Nest / Prisma
+server/node_modules/
+server/dist/
+server/coverage/
+server/*.tsbuildinfo
+
+# Editors
+.idea/
+.vscode/
