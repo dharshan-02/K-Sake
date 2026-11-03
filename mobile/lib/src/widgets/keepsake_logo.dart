@@ -30,17 +30,9 @@ class KeepsakeLogo extends StatelessWidget {
           ),
         ],
       ),
+      padding: EdgeInsets.all(size * 0.14),
       clipBehavior: Clip.antiAlias,
-      child: Image.asset(
-        'assets/images/app_logo.png',
-        width: size,
-        height: size,
-        fit: BoxFit.contain,
-        errorBuilder: (context, error, stackTrace) => Padding(
-          padding: EdgeInsets.all(size * 0.12),
-          child: const FlutterLogo(),
-        ),
-      ),
+      child: const FlutterLogo(),
     );
 
     if (!showWordmark) return mark;

@@ -54,6 +54,16 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
       }
       return;
     }
+    if (!await _api.hasSession) {
+      if (mounted) {
+        setState(() {
+          _devices = [];
+          _error = 'Sign in to your Keep Safe cloud account to view and manage registered devices.';
+          _loading = false;
+        });
+      }
+      return;
+    }
     try {
       final devices = await _api.getDevices();
       final currentId = await _api.currentSessionId;
@@ -158,14 +168,24 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.cloud_off_outlined, size: 40),
-                    const SizedBox(height: 12),
-                    Text(_error!, textAlign: TextAlign.center),
-                    const SizedBox(height: 12),
+                    Icon(
+                      _error!.contains('Sign in')
+                          ? Icons.devices_outlined
+                          : Icons.cloud_off_outlined,
+                      size: 48,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      _error!,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
+                    ),
+                    const SizedBox(height: 16),
                     FilledButton.icon(
                       onPressed: _load,
                       icon: const Icon(Icons.refresh),
-                      label: const Text('Try again'),
+                      label: const Text('Refresh'),
                     ),
                   ],
                 ),

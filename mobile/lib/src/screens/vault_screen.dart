@@ -1013,7 +1013,7 @@ class _VaultScreenState extends State<VaultScreen> {
                 shape: BoxShape.circle,
               ),
               child: Icon(
-                inFolder ? Icons.folder_open_rounded : Icons.shield_outlined,
+                inFolder ? Icons.folder_open_rounded : Icons.lock_outline_rounded,
                 size: 34,
                 color: inFolder ? const Color(0xFFE09F3E) : Theme.of(context).colorScheme.primary,
               ),

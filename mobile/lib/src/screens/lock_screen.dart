@@ -88,7 +88,7 @@ class _LockScreenState extends State<LockScreen> {
       }
 
       final authenticated = await _localAuth.authenticate(
-        localizedReason: 'Authenticate to unlock your Keepsake Vault',
+        localizedReason: 'Authenticate to unlock your Keep Safe Vault',
         persistAcrossBackgrounding: true,
       );
 
@@ -100,9 +100,12 @@ class _LockScreenState extends State<LockScreen> {
         if (mounted) widget.onUnlock(false);
       }
     } catch (e) {
-      final errStr = e.toString();
-      if (!errStr.contains('userCanceled') && !errStr.contains('authInProgress')) {
-        setState(() => _error = 'Biometrics failed. Use your PIN or Password.');
+      final errStr = e.toString().toLowerCase();
+      if (!errStr.contains('usercanceled') &&
+          !errStr.contains('cancel') &&
+          !errStr.contains('authinprogress') &&
+          !errStr.contains('notavailable')) {
+        setState(() => _error = 'Biometrics check did not complete. Try again or switch method.');
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -511,6 +514,14 @@ class _LockScreenState extends State<LockScreen> {
           onPressed: _busy ? null : _authenticateBiometric,
           icon: const Icon(Icons.refresh),
           label: const Text('Try Biometrics Again'),
+        ),
+        const SizedBox(height: 12),
+        TextButton(
+          onPressed: () => setState(() {
+            _error = null;
+            _currentType = AuthLockType.pin;
+          }),
+          child: const Text('Unlock with PIN or Password'),
         ),
       ],
     );
