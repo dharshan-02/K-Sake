@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import '../data/local_vault.dart';
 import '../data/api_client.dart';
 import '../data/auth_service.dart';
+import '../data/firebase_sync_service.dart';
 import 'file_preview_screen.dart';
 import 'cloud_files_screen.dart';
 import 'recovery_screen.dart';
@@ -38,6 +39,7 @@ class _VaultScreenState extends State<VaultScreen> {
   String _selectedDate = 'all';
   String? _message;
   late final ApiClient _api = ApiClient(widget.vault);
+  late final FirebaseSyncService _firebaseSync = FirebaseSyncService(widget.vault);
   StreamSubscription<List<ConnectivityResult>>? _connectivity;
   bool _syncing = false;
   bool _hasCloudSession = false;
@@ -65,7 +67,7 @@ class _VaultScreenState extends State<VaultScreen> {
     final files = await widget.vault.listFiles(isHidden: widget.isHiddenVault);
     final hasCloudSession = widget.isHiddenVault
         ? false
-        : await _api.hasSession;
+        : (_firebaseSync.isAuthenticated || await _api.hasSession);
     if (mounted) {
       setState(() {
         _files = files;
@@ -364,7 +366,7 @@ class _VaultScreenState extends State<VaultScreen> {
 
   Future<void> _uploadFile(VaultFile file) async {
     if (widget.isHiddenVault) return;
-    if (!await _api.hasSession) {
+    if (!_firebaseSync.isAuthenticated && !await _api.hasSession) {
       _account();
       return;
     }
@@ -380,16 +382,20 @@ class _VaultScreenState extends State<VaultScreen> {
           .toList();
     });
     try {
-      await _api.uploadSingleFile(
-        file,
-        onProgress: (sent, total) {
-          if (!mounted) return;
-          setState(
-            () => _uploadProgress[file.id] = total == 0 ? 0 : sent / total,
-          );
-        },
-        isCancelled: () => _cancelledUploads.contains(file.id),
-      );
+      if (_firebaseSync.isAuthenticated) {
+        await _firebaseSync.uploadFile(file);
+      } else {
+        await _api.uploadSingleFile(
+          file,
+          onProgress: (sent, total) {
+            if (!mounted) return;
+            setState(
+              () => _uploadProgress[file.id] = total == 0 ? 0 : sent / total,
+            );
+          },
+          isCancelled: () => _cancelledUploads.contains(file.id),
+        );
+      }
       await widget.vault.addNotification(
         'Upload complete',
         file.name,
@@ -478,8 +484,8 @@ class _VaultScreenState extends State<VaultScreen> {
 
   Future<void> _account() async {
     if (widget.isHiddenVault) return;
-    final hasSession = await _api.hasSession;
-    final userEmail = await _api.userEmail;
+    final hasSession = _firebaseSync.isAuthenticated || await _api.hasSession;
+    final userEmail = _firebaseSync.userEmail ?? await _api.userEmail;
     if (!mounted) return;
     if (hasSession) {
       final action = await showModalBottomSheet<String>(
@@ -494,8 +500,10 @@ class _VaultScreenState extends State<VaultScreen> {
                     userEmail,
                     style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
-                  subtitle: const Text(
-                    'Cloud account signed in · sync runs when online',
+                  subtitle: Text(
+                    _firebaseSync.isAuthenticated
+                        ? 'Firebase cloud active · Zero-knowledge encrypted sync'
+                        : 'Cloud account signed in · sync runs when online',
                   ),
                 ),
               ListTile(
@@ -530,7 +538,11 @@ class _VaultScreenState extends State<VaultScreen> {
         ),
       );
       if (action == 'signout') {
+        if (_firebaseSync.isAuthenticated) {
+          await _firebaseSync.signOut();
+        }
         await _api.signOut();
+        await _reload();
         if (mounted) {
           setState(
             () =>
@@ -586,53 +598,84 @@ class _VaultScreenState extends State<VaultScreen> {
       setState(() => _message = 'Syncing encrypted files with cloud…');
     }
     try {
-      final summary = await _api.syncAll(
-        downloadMissing: true,
-        onUploadProgress: (id, sent, total) {
-          if (!mounted) return;
-          setState(() {
-            _uploadProgress[id] = total == 0 ? 0 : sent / total;
-            _files = _files
-                .map(
-                  (file) =>
-                      file.id == id ? _withSyncState(file, 'uploading') : file,
-                )
-                .toList();
-          });
-        },
-        isUploadCancelled: (id) => _cancelledUploads.contains(id),
-      );
-      if (summary.uploaded > 0) {
-        await widget.vault.addNotification(
-          'Uploads complete',
-          '${summary.uploaded} file${summary.uploaded == 1 ? '' : 's'} synced to your cloud vault.',
-          type: 'upload',
-        );
-      }
-      if (summary.downloaded > 0) {
-        await widget.vault.addNotification(
-          'Downloads complete',
-          '${summary.downloaded} cloud file${summary.downloaded == 1 ? '' : 's'} are available offline.',
-          type: 'download',
-        );
-      }
-      await _reload();
-      if (mounted && !silent) {
-        final parts = <String>[];
-        if (summary.uploaded > 0) parts.add('${summary.uploaded} uploaded');
-        if (summary.downloaded > 0) {
-          parts.add('${summary.downloaded} downloaded');
+      if (_firebaseSync.isAuthenticated) {
+        final summary = await _firebaseSync.syncAll(downloadMissing: true);
+        if (summary.uploaded > 0) {
+          await widget.vault.addNotification(
+            'Uploads complete',
+            '${summary.uploaded} file${summary.uploaded == 1 ? '' : 's'} synced to your cloud vault.',
+            type: 'upload',
+          );
         }
-        setState(
-          () => _message = parts.isEmpty
-              ? 'Vault up to date (${summary.totalCloud} in cloud)'
-              : 'Synced: ${parts.join(', ')}',
+        if (summary.downloaded > 0) {
+          await widget.vault.addNotification(
+            'Downloads complete',
+            '${summary.downloaded} cloud file${summary.downloaded == 1 ? '' : 's'} are available offline.',
+            type: 'download',
+          );
+        }
+        await _reload();
+        if (mounted && !silent) {
+          final parts = <String>[];
+          if (summary.uploaded > 0) parts.add('${summary.uploaded} uploaded');
+          if (summary.downloaded > 0) {
+            parts.add('${summary.downloaded} downloaded');
+          }
+          setState(
+            () => _message = parts.isEmpty
+                ? 'Vault up to date (${summary.totalCloud} in cloud)'
+                : 'Synced: ${parts.join(', ')}',
+          );
+        }
+      } else {
+        final summary = await _api.syncAll(
+          downloadMissing: true,
+          onUploadProgress: (id, sent, total) {
+            if (!mounted) return;
+            setState(() {
+              _uploadProgress[id] = total == 0 ? 0 : sent / total;
+              _files = _files
+                  .map(
+                    (file) =>
+                        file.id == id ? _withSyncState(file, 'uploading') : file,
+                  )
+                  .toList();
+            });
+          },
+          isUploadCancelled: (id) => _cancelledUploads.contains(id),
         );
+        if (summary.uploaded > 0) {
+          await widget.vault.addNotification(
+            'Uploads complete',
+            '${summary.uploaded} file${summary.uploaded == 1 ? '' : 's'} synced to your cloud vault.',
+            type: 'upload',
+          );
+        }
+        if (summary.downloaded > 0) {
+          await widget.vault.addNotification(
+            'Downloads complete',
+            '${summary.downloaded} cloud file${summary.downloaded == 1 ? '' : 's'} are available offline.',
+            type: 'download',
+          );
+        }
+        await _reload();
+        if (mounted && !silent) {
+          final parts = <String>[];
+          if (summary.uploaded > 0) parts.add('${summary.uploaded} uploaded');
+          if (summary.downloaded > 0) {
+            parts.add('${summary.downloaded} downloaded');
+          }
+          setState(
+            () => _message = parts.isEmpty
+                ? 'Vault up to date (${summary.totalCloud} in cloud)'
+                : 'Synced: ${parts.join(', ')}',
+          );
+        }
       }
     } catch (_) {
       if (mounted && !silent) {
         setState(
-          () => _message = 'Could not sync with server. Local vault is safe.',
+          () => _message = 'Could not reach cloud. Your encrypted files are safe on this device and can be synced later.',
         );
       }
     } finally {
@@ -1121,8 +1164,22 @@ class _AccountDialogState extends State<_AccountDialog> {
           );
         }
       }
-      await ApiClient(LocalVault())
-          .authenticate(email, password, createAccount: _create);
+      try {
+        final fb = FirebaseSyncService(LocalVault());
+        if (_create) {
+          await fb.signUp(email, password);
+        } else {
+          await fb.signIn(email, password);
+        }
+      } catch (fbErr) {
+        // If Firebase throws, also try legacy/local ApiClient
+        try {
+          await ApiClient(LocalVault())
+              .authenticate(email, password, createAccount: _create);
+        } catch (_) {
+          rethrow;
+        }
+      }
       await LocalVault().setMasterKeyFromCredentials(email, password);
       await AuthService().saveAccountCredentials(
         email: email,

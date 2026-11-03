@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../data/api_client.dart';
+import '../data/firebase_sync_service.dart';
 import '../data/local_vault.dart';
 import '../models/vault_file.dart';
 import 'file_preview_screen.dart';
@@ -15,6 +16,7 @@ class CloudFilesScreen extends StatefulWidget {
 }
 
 class _CloudFilesScreenState extends State<CloudFilesScreen> {
+  late final FirebaseSyncService _firebaseSync = FirebaseSyncService(widget.vault);
   List<Map<String, dynamic>> _files = [];
   bool _loading = true;
   bool _downloadingAll = false;
@@ -33,7 +35,11 @@ class _CloudFilesScreenState extends State<CloudFilesScreen> {
       _error = null;
     });
     try {
-      _files = await widget.api.listCloudFiles();
+      if (_firebaseSync.isAuthenticated) {
+        _files = await _firebaseSync.listCloudFiles();
+      } else {
+        _files = await widget.api.listCloudFiles();
+      }
     } catch (e) {
       _error = e.toString().replaceFirst('Exception: ', '');
     } finally {
@@ -48,7 +54,11 @@ class _CloudFilesScreenState extends State<CloudFilesScreen> {
       _error = null;
     });
     try {
-      await widget.api.downloadToVault(file);
+      if (_firebaseSync.isAuthenticated) {
+        await _firebaseSync.downloadToVault(file);
+      } else {
+        await widget.api.downloadToVault(file);
+      }
       await widget.vault.addNotification(
         'File downloaded',
         file['name'] as String,
@@ -78,7 +88,11 @@ class _CloudFilesScreenState extends State<CloudFilesScreen> {
         final id = file['id'] as String;
         final local = await widget.vault.findFile(id, includeTrashed: true);
         if (local == null) {
-          await widget.api.downloadToVault(file);
+          if (_firebaseSync.isAuthenticated) {
+            await _firebaseSync.downloadToVault(file);
+          } else {
+            await widget.api.downloadToVault(file);
+          }
           await widget.vault.addNotification(
             'File downloaded',
             file['name'] as String,

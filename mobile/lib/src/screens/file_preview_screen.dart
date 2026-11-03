@@ -2,7 +2,6 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:pdfrx/pdfrx.dart';
-import 'package:video_player/video_player.dart';
 
 import '../data/local_vault.dart';
 import '../models/vault_file.dart';
@@ -55,7 +54,18 @@ class _FilePreviewScreenState extends State<FilePreviewScreen> {
         final ext = widget.file.name.split('.').last.toLowerCase();
         if (widget.file.mimeType.startsWith('video/') ||
             const {'mp4', 'mov', 'mkv', 'avi', '3gp'}.contains(ext)) {
-          return _EncryptedVideoPreview(file: file);
+          return Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.movie_outlined, size: 64, color: Colors.grey),
+                const SizedBox(height: 12),
+                Text(widget.file.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                const Text('Encrypted video safely stored in vault.', style: TextStyle(color: Colors.grey)),
+              ],
+            ),
+          );
         }
         if (widget.file.mimeType.startsWith('image/') ||
             const {'jpg', 'jpeg', 'png', 'gif', 'webp'}.contains(ext)) {
@@ -89,79 +99,5 @@ class _FilePreviewScreenState extends State<FilePreviewScreen> {
         );
       },
     ),
-  );
-}
-
-class _EncryptedVideoPreview extends StatefulWidget {
-  const _EncryptedVideoPreview({required this.file});
-  final File file;
-
-  @override
-  State<_EncryptedVideoPreview> createState() => _EncryptedVideoPreviewState();
-}
-
-class _EncryptedVideoPreviewState extends State<_EncryptedVideoPreview> {
-  late final VideoPlayerController _controller = VideoPlayerController.file(
-    widget.file,
-  );
-  late final Future<void> _initialized = _controller.initialize();
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => FutureBuilder<void>(
-    future: _initialized,
-    builder: (context, snapshot) {
-      if (snapshot.hasError) {
-        return const Center(
-          child: Text('This video format cannot be played on this device.'),
-        );
-      }
-      if (snapshot.connectionState != ConnectionState.done) {
-        return const Center(child: CircularProgressIndicator());
-      }
-      final aspect = _controller.value.aspectRatio;
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              AspectRatio(
-                aspectRatio: aspect > 0 ? aspect : 16 / 9,
-                child: VideoPlayer(_controller),
-              ),
-              Row(
-                children: [
-                  ValueListenableBuilder<VideoPlayerValue>(
-                    valueListenable: _controller,
-                    builder: (context, value, _) => IconButton(
-                      onPressed: () => value.isPlaying
-                          ? _controller.pause()
-                          : _controller.play(),
-                      icon: Icon(
-                        value.isPlaying ? Icons.pause : Icons.play_arrow,
-                      ),
-                      tooltip: value.isPlaying ? 'Pause video' : 'Play video',
-                    ),
-                  ),
-                  Expanded(
-                    child: VideoProgressIndicator(
-                      _controller,
-                      allowScrubbing: true,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      );
-    },
   );
 }

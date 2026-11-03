@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../data/api_client.dart';
 import '../data/auth_service.dart';
+import '../data/firebase_sync_service.dart';
 import '../data/local_vault.dart';
 import '../widgets/keepsake_logo.dart';
 
@@ -34,6 +36,7 @@ class _AuthScreenState extends State<AuthScreen>
   );
   final _authService = AuthService();
   late final ApiClient _apiClient = ApiClient(widget.vault);
+  late final FirebaseSyncService _firebaseSync = FirebaseSyncService(widget.vault);
 
   final _signInEmail = TextEditingController();
   final _signInPassword = TextEditingController();
@@ -91,7 +94,18 @@ class _AuthScreenState extends State<AuthScreen>
         );
       }
 
-      await _apiClient.authenticate(email, password, createAccount: false);
+      // Try Firebase Auth first (Free Cloud Sync anywhere), then backend API
+      try {
+        await _firebaseSync.signIn(email, password);
+      } catch (fbErr) {
+        debugPrint('Firebase sign in notice: $fbErr');
+        try {
+          await _apiClient.authenticate(email, password, createAccount: false);
+        } catch (_) {
+          rethrow;
+        }
+      }
+
       await widget.vault.setMasterKeyFromCredentials(email, password);
       await _authService.registerUser(
         email: email,
@@ -132,7 +146,16 @@ class _AuthScreenState extends State<AuthScreen>
 
     try {
       if (!_deviceOnly) {
-        await _apiClient.authenticate(email, password, createAccount: true);
+        try {
+          await _firebaseSync.signUp(email, password);
+        } catch (fbErr) {
+          debugPrint('Firebase register notice: $fbErr');
+          try {
+            await _apiClient.authenticate(email, password, createAccount: true);
+          } catch (_) {
+            rethrow;
+          }
+        }
       }
 
       await widget.vault.setMasterKeyFromCredentials(email, password);
@@ -182,6 +205,25 @@ class _AuthScreenState extends State<AuthScreen>
   }
 
   String _friendlyError(Object error) {
+    if (error is FirebaseAuthException) {
+      switch (error.code) {
+        case 'user-not-found':
+          return 'No account found with this email. Tap "Create account" to register.';
+        case 'wrong-password':
+        case 'invalid-credential':
+          return 'Incorrect email or password. Please check and try again.';
+        case 'email-already-in-use':
+          return 'An account already exists with this email. Please switch to "Sign in".';
+        case 'weak-password':
+          return 'Password is too weak. Please use at least 6 characters.';
+        case 'invalid-email':
+          return 'Please enter a valid email address.';
+        case 'network-request-failed':
+          return 'Network error. Check your internet connection.';
+        default:
+          return error.message ?? 'Authentication failed.';
+      }
+    }
     if (error is ApiConnectionException) return error.message;
     if (error is TimeoutException || error is SocketException) {
       return 'Keepsake could not reach the server. Check your connection and API address, or use a local account on this device.';
@@ -420,12 +462,35 @@ class _AuthScreenState extends State<AuthScreen>
                   ),
                   const SizedBox(width: 9),
                   Expanded(
-                    child: Text(
-                      _error!,
-                      style: TextStyle(
-                        color: colors.onErrorContainer,
-                        height: 1.35,
-                      ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _error!,
+                          style: TextStyle(
+                            color: colors.onErrorContainer,
+                            height: 1.35,
+                          ),
+                        ),
+                        if (_error!.contains('server') ||
+                            _error!.contains('address') ||
+                            _error!.contains('network')) ...[
+                          const SizedBox(height: 8),
+                          OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: colors.onErrorContainer,
+                              side: BorderSide(
+                                color: colors.onErrorContainer.withValues(alpha: 0.5),
+                              ),
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                              visualDensity: VisualDensity.compact,
+                            ),
+                            onPressed: _configureServerUrl,
+                            icon: const Icon(Icons.tune_rounded, size: 16),
+                            label: const Text('Change Server Address', style: TextStyle(fontSize: 12)),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
                 ],

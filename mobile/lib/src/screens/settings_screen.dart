@@ -5,6 +5,7 @@ import 'package:local_auth/local_auth.dart';
 import '../data/local_vault.dart';
 import '../data/api_client.dart';
 import '../data/auth_service.dart';
+import '../data/firebase_sync_service.dart';
 import '../models/theme_settings.dart';
 import '../widgets/pattern_lock_view.dart';
 import 'recovery_screen.dart';
@@ -58,9 +59,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final stats = await widget.vault.getVaultStats(
       isHidden: widget.isHiddenVault,
     );
+    final fb = FirebaseSyncService(widget.vault);
     final api = ApiClient(widget.vault);
-    final hasSession = await api.hasSession;
-    final email = await api.userEmail ?? await _authService.getUserEmail();
+    final hasSession = fb.isAuthenticated || await api.hasSession;
+    final email = fb.userEmail ?? await api.userEmail ?? await _authService.getUserEmail();
     final accountMode = await _authService.getAccountMode();
     final sUrl = await ApiClient.getBaseUrl();
 
@@ -145,15 +147,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _syncNow() async {
     final messenger = ScaffoldMessenger.of(context);
     try {
-      final summary = await ApiClient(widget.vault)
-          .syncAll(downloadMissing: true);
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            'Sync complete: ${summary.uploaded} uploaded, ${summary.downloaded} downloaded.',
+      final fb = FirebaseSyncService(widget.vault);
+      if (fb.isAuthenticated) {
+        final summary = await fb.syncAll(downloadMissing: true);
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              'Sync complete: ${summary.uploaded} uploaded, ${summary.downloaded} downloaded.',
+            ),
           ),
-        ),
-      );
+        );
+      } else {
+        final summary = await ApiClient(widget.vault)
+            .syncAll(downloadMissing: true);
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              'Sync complete: ${summary.uploaded} uploaded, ${summary.downloaded} downloaded.',
+            ),
+          ),
+        );
+      }
       await _loadSettings();
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text('Sync failed: $e')));
@@ -181,6 +195,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
     if (confirmed == true) {
+      await FirebaseSyncService(widget.vault).signOut();
       await ApiClient(widget.vault).signOut();
       await _loadSettings();
       if (mounted) {
