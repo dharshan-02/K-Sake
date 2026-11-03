@@ -21,7 +21,7 @@ class KeepsakeApp extends StatelessWidget {
     return ListenableBuilder(
       listenable: themeCtrl,
       builder: (context, _) => MaterialApp(
-        title: 'Keepsake',
+        title: 'Keep Safe',
         debugShowCheckedModeBanner: false,
         theme: themeCtrl.themeData,
         home: AppRootFlow(vault: vault),
@@ -201,7 +201,7 @@ class _LaunchScreenState extends State<_LaunchScreen>
             ),
             const SizedBox(height: 22),
             Text(
-              'Keepsake',
+              'Keep Safe',
               style: Theme.of(context).textTheme.headlineSmall
                   ?.copyWith(fontWeight: FontWeight.w800),
             ),

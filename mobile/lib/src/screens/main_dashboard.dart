@@ -154,7 +154,7 @@ class _MainDashboardState extends State<MainDashboard> {
               const SizedBox(width: 8),
             ],
             Text(
-              _hiddenMode ? 'Hidden Safe' : 'Keepsake',
+              _hiddenMode ? 'Hidden Safe' : 'Keep Safe',
               style: TextStyle(
                 fontWeight: FontWeight.bold,
                 letterSpacing: -0.3,
