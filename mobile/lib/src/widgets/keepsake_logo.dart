@@ -30,7 +30,7 @@ class KeepsakeLogo extends StatelessWidget {
           ),
         ],
       ),
-      padding: EdgeInsets.all(size * 0.12),
+      padding: EdgeInsets.all(size * 0.10),
       clipBehavior: Clip.antiAlias,
       child: Image.asset(
         'assets/images/app_logo.png',
@@ -39,7 +39,7 @@ class KeepsakeLogo extends StatelessWidget {
         fit: BoxFit.contain,
         errorBuilder: (context, error, stackTrace) => CustomPaint(
           size: Size(size, size),
-          painter: _KSMonogramPainter(),
+          painter: _PremiumKSPainter(),
         ),
       ),
     );
@@ -62,27 +62,27 @@ class KeepsakeLogo extends StatelessWidget {
   }
 }
 
-class _KSMonogramPainter extends CustomPainter {
+class _PremiumKSPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final scale = size.width / 512.0;
-    final strokeW = 36.0 * scale;
+    final strokeW = 42.0 * scale;
 
-    final penLight = Paint()
+    final penCyan = Paint()
       ..color = const Color(0xFF38BDF8)
       ..strokeWidth = strokeW
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round;
 
-    final penMid = Paint()
+    final penBlue = Paint()
       ..color = const Color(0xFF2563EB)
       ..strokeWidth = strokeW
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round;
 
-    final penDark = Paint()
+    final penIndigo = Paint()
       ..color = const Color(0xFF1D4ED8)
       ..strokeWidth = strokeW
       ..style = PaintingStyle.stroke
@@ -90,49 +90,43 @@ class _KSMonogramPainter extends CustomPainter {
       ..strokeJoin = StrokeJoin.round;
 
     // --- Letter K ---
-    final kX = 140.0 * scale;
-    final kTopY = 140.0 * scale;
-    final kBotY = 372.0 * scale;
-    canvas.drawLine(Offset(kX, kTopY), Offset(kX, kBotY), penMid);
-
+    final kX = 142.0 * scale;
+    final kTopY = 132.0 * scale;
+    final kBotY = 380.0 * scale;
     final kMidY = 256.0 * scale;
-    final kArmTopX = 236.0 * scale;
-    final kArmTopY = 140.0 * scale;
-    canvas.drawLine(Offset(kX, kMidY), Offset(kArmTopX, kArmTopY), penLight);
 
-    final kArmBotX = 236.0 * scale;
-    final kArmBotY = 372.0 * scale;
+    canvas.drawLine(Offset(kX, kTopY), Offset(kX, kBotY), penBlue);
+
+    final kArmTopX = 248.0 * scale;
+    final kArmTopY = 132.0 * scale;
+    canvas.drawLine(Offset(kX, kMidY), Offset(kArmTopX, kArmTopY), penCyan);
+
+    final kArmBotX = 248.0 * scale;
+    final kArmBotY = 380.0 * scale;
     canvas.drawLine(
-      Offset(kX + 14.0 * scale, kMidY + 8.0 * scale),
+      Offset(kX + 16.0 * scale, kMidY + 12.0 * scale),
       Offset(kArmBotX, kArmBotY),
-      penDark,
+      penIndigo,
     );
 
     // --- Letter S ---
-    final sLeft = 285.0 * scale;
-    final sRight = 385.0 * scale;
-    final sTop = 140.0 * scale;
+    final sLeft = 280.0 * scale;
+    final sRight = 395.0 * scale;
+    final sWidth = sRight - sLeft;
+    final sTop = 132.0 * scale;
     final sMid = 256.0 * scale;
-    final arcH = 116.0 * scale;
+    final loopH = 126.0 * scale;
 
-    final sTopHalf = Path()
-      ..addArc(
-        Rect.fromLTWH(sLeft, sTop, sRight - sLeft, arcH),
-        0.35,
-        -3.5,
-      )
-      ..lineTo(sRight - 12.0 * scale, sMid + 25.0 * scale);
-    canvas.drawPath(sTopHalf, penLight);
+    final sTopPath = Path()
+      ..addArc(Rect.fromLTWH(sLeft, sTop, sWidth, loopH), 0, -3.4)
+      ..lineTo(sRight - 8.0 * scale, sMid + 28.0 * scale);
+    canvas.drawPath(sTopPath, penCyan);
 
-    final sBotHalf = Path()
-      ..moveTo(sLeft + 12.0 * scale, sMid + 15.0 * scale)
-      ..lineTo(sRight - 10.0 * scale, sMid + 30.0 * scale)
-      ..addArc(
-        Rect.fromLTWH(sLeft, sMid - 6.0 * scale, sRight - sLeft, arcH),
-        3.5,
-        -3.5,
-      );
-    canvas.drawPath(sBotHalf, penDark);
+    final sBotPath = Path()
+      ..moveTo(sLeft + 14.0 * scale, sMid + 16.0 * scale)
+      ..lineTo(sRight - 2.0 * scale, sMid + 32.0 * scale)
+      ..addArc(Rect.fromLTWH(sLeft, sMid - 2.0 * scale, sWidth, loopH), 0.35, 3.4);
+    canvas.drawPath(sBotPath, penIndigo);
   }
 
   @override
