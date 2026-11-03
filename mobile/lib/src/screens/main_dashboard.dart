@@ -41,6 +41,70 @@ class _MainDashboardState extends State<MainDashboard> {
     widget.vault.refreshUnreadNotificationCount(isHidden: widget.isHiddenVault);
   }
 
+  Future<void> _triggerSync() async {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Text('Syncing encrypted vault...'),
+        duration: Duration(seconds: 1),
+      ),
+    );
+    try {
+      final summary = await FirebaseSyncService(widget.vault)
+          .syncAll(downloadMissing: true);
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            summary.uploaded == 0 && summary.downloaded == 0
+                ? 'Vault is up to date (${summary.totalCloud} cloud files).'
+                : 'Synced: ${summary.uploaded} uploaded, ${summary.downloaded} downloaded.',
+          ),
+        ),
+      );
+    } catch (_) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Cloud sync check completed. Encrypted files are safe.',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _triggerLogout() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Log out?'),
+        content: const Text(
+          'Your files remain encrypted on this device. Logging out returns you to the login screen.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Log out'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await FirebaseSyncService(widget.vault).signOut();
+      if (widget.onLogout != null) {
+        widget.onLogout!();
+      } else {
+        widget.onLock();
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final pages = [
@@ -100,41 +164,6 @@ class _MainDashboardState extends State<MainDashboard> {
           ],
         ),
         actions: [
-          if (!_hiddenMode)
-            IconButton(
-              icon: const Icon(Icons.sync_rounded),
-              tooltip: 'Sync Vault',
-              onPressed: () async {
-                final messenger = ScaffoldMessenger.of(context);
-                messenger.showSnackBar(
-                  const SnackBar(
-                    content: Text('Syncing encrypted vault...'),
-                    duration: Duration(seconds: 1),
-                  ),
-                );
-                try {
-                  final summary = await FirebaseSyncService(widget.vault)
-                      .syncAll(downloadMissing: true);
-                  messenger.showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        summary.uploaded == 0 && summary.downloaded == 0
-                            ? 'Vault is up to date (${summary.totalCloud} cloud files).'
-                            : 'Synced: ${summary.uploaded} uploaded, ${summary.downloaded} downloaded.',
-                      ),
-                    ),
-                  );
-                } catch (_) {
-                  messenger.showSnackBar(
-                    const SnackBar(
-                      content: Text(
-                        'Cloud sync check completed. Encrypted files are safe.',
-                      ),
-                    ),
-                  );
-                }
-              },
-            ),
           ValueListenableBuilder<int>(
             valueListenable: widget.vault.unreadNotificationCount,
             builder: (context, count, _) => IconButton(
@@ -156,45 +185,44 @@ class _MainDashboardState extends State<MainDashboard> {
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.lock_outline),
+            icon: const Icon(Icons.lock_outline_rounded),
             tooltip: 'Lock Vault',
             onPressed: widget.onLock,
           ),
-          IconButton(
-            icon: const Icon(Icons.logout_rounded, color: Colors.redAccent),
-            tooltip: 'Log out',
-            onPressed: () async {
-              final confirmed = await showDialog<bool>(
-                context: context,
-                builder: (ctx) => AlertDialog(
-                  title: const Text('Log out?'),
-                  content: const Text(
-                    'Your files remain encrypted on this device. Logging out returns you to the login screen.',
-                  ),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(ctx, false),
-                      child: const Text('Cancel'),
-                    ),
-                    FilledButton(
-                      style: FilledButton.styleFrom(
-                        backgroundColor: Colors.redAccent,
-                      ),
-                      onPressed: () => Navigator.pop(ctx, true),
-                      child: const Text('Log out'),
-                    ),
-                  ],
-                ),
-              );
-              if (confirmed == true) {
-                await FirebaseSyncService(widget.vault).signOut();
-                if (widget.onLogout != null) {
-                  widget.onLogout!();
-                } else {
-                  widget.onLock();
-                }
+          PopupMenuButton<String>(
+            tooltip: 'More options',
+            icon: const Icon(Icons.more_vert_rounded),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            onSelected: (val) {
+              if (val == 'sync') {
+                _triggerSync();
+              } else if (val == 'logout') {
+                _triggerLogout();
               }
             },
+            itemBuilder: (ctx) => [
+              if (!_hiddenMode)
+                const PopupMenuItem(
+                  value: 'sync',
+                  child: Row(
+                    children: [
+                      Icon(Icons.sync_rounded, size: 20),
+                      SizedBox(width: 12),
+                      Text('Sync Vault'),
+                    ],
+                  ),
+                ),
+              const PopupMenuItem(
+                value: 'logout',
+                child: Row(
+                  children: [
+                    Icon(Icons.logout_rounded, color: Colors.redAccent, size: 20),
+                    SizedBox(width: 12),
+                    Text('Log out', style: TextStyle(color: Colors.redAccent)),
+                  ],
+                ),
+              ),
+            ],
           ),
         ],
       ),

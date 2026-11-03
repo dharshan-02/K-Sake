@@ -217,6 +217,7 @@ class LocalVault {
     String name,
     String mimeType, {
     bool isHidden = false,
+    String? folderName,
   }) async {
     final id = _uuid.v4();
     final source = File(sourcePath);
@@ -289,7 +290,7 @@ class LocalVault {
         now.toIso8601String(),
         destination.path,
         'queued',
-        null,
+        folderName,
         isHidden ? 1 : 0,
       ],
     );
@@ -301,7 +302,43 @@ class LocalVault {
       createdAt: now,
       localPath: destination.path,
       syncState: 'queued',
+      folderName: folderName,
       isHidden: isHidden,
+    );
+  }
+
+  Future<void> deleteFolder(String folderName, {bool isHidden = false}) async {
+    _db!.execute(
+      'DELETE FROM folders WHERE is_hidden = ? AND name = ?',
+      [isHidden ? 1 : 0, folderName],
+    );
+    _db!.execute(
+      'UPDATE files SET folder_name = NULL WHERE is_hidden = ? AND folder_name = ?',
+      [isHidden ? 1 : 0, folderName],
+    );
+  }
+
+  Future<void> renameFolder(
+    String oldName,
+    String newName, {
+    bool isHidden = false,
+  }) async {
+    final clean = newName.trim();
+    if (clean.isEmpty ||
+        clean.length > 80 ||
+        clean.contains('/') ||
+        clean.contains('\\')) {
+      throw const FormatException(
+        'Choose a folder name up to 80 characters without slashes.',
+      );
+    }
+    _db!.execute(
+      'UPDATE folders SET name = ? WHERE is_hidden = ? AND name = ?',
+      [clean, isHidden ? 1 : 0, oldName],
+    );
+    _db!.execute(
+      'UPDATE files SET folder_name = ? WHERE is_hidden = ? AND folder_name = ?',
+      [clean, isHidden ? 1 : 0, oldName],
     );
   }
 

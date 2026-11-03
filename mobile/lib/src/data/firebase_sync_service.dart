@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../models/vault_credential.dart';
@@ -42,6 +43,26 @@ class FirebaseSyncService {
     );
     await vault.setMasterKeyFromCredentials(email.trim(), password);
     return credential;
+  }
+
+  Future<UserCredential> signInWithGoogle() async {
+    final googleSignIn = GoogleSignIn();
+    final googleUser = await googleSignIn.signIn();
+    if (googleUser == null) {
+      throw StateError('Google Sign-In was cancelled.');
+    }
+    final googleAuth = await googleUser.authentication;
+    final credential = GoogleAuthProvider.credential(
+      accessToken: googleAuth.accessToken,
+      idToken: googleAuth.idToken,
+    );
+    final userCred = await _auth.signInWithCredential(credential);
+    final email = userCred.user?.email ?? googleUser.email;
+    await vault.setMasterKeyFromCredentials(
+      email,
+      userCred.user?.uid ?? 'google-auth-vault-key',
+    );
+    return userCred;
   }
 
   Future<void> sendPasswordReset(String email) async {

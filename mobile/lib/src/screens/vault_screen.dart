@@ -67,12 +67,12 @@ class _VaultScreenState extends State<VaultScreen> {
     final hasCloudSession = widget.isHiddenVault
         ? false
         : (_firebaseSync.isAuthenticated || await _api.hasSession);
+    final folders = widget.vault.listFolders(isHidden: widget.isHiddenVault);
     if (mounted) {
       setState(() {
         _files = files;
         _hasCloudSession = hasCloudSession;
-        if (_selectedFolder != null &&
-            !files.any((f) => f.folderName == _selectedFolder)) {
+        if (_selectedFolder != null && !folders.contains(_selectedFolder)) {
           _selectedFolder = null;
         }
         _loading = false;
@@ -102,6 +102,7 @@ class _VaultScreenState extends State<VaultScreen> {
         file.name,
         mime,
         isHidden: widget.isHiddenVault,
+        folderName: _selectedFolder,
       );
       imported++;
     }
@@ -230,6 +231,118 @@ class _VaultScreenState extends State<VaultScreen> {
             .showSnackBar(SnackBar(content: Text(message)));
       }
     }
+  }
+
+  Future<void> _deleteFolder(String folderName) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Delete folder "$folderName"?'),
+        content: const Text(
+          'Files inside this folder will stay in your vault as unassigned files.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await widget.vault.deleteFolder(folderName, isHidden: widget.isHiddenVault);
+      if (_selectedFolder == folderName) {
+        _selectedFolder = null;
+      }
+      await _reload();
+      if (mounted) {
+        setState(() => _message = 'Folder "$folderName" removed.');
+      }
+    }
+  }
+
+  Future<void> _renameFolder(String oldName) async {
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (ctx) => FolderNameDialog(
+        title: 'Rename folder',
+        submitLabel: 'Rename',
+        fieldLabel: 'Folder name',
+        hintText: 'Enter new folder name',
+        initialName: oldName,
+      ),
+    );
+    if (newName == null || newName.trim().isEmpty || newName.trim() == oldName) return;
+    try {
+      await widget.vault.renameFolder(oldName, newName.trim(), isHidden: widget.isHiddenVault);
+      if (_selectedFolder == oldName) {
+        _selectedFolder = newName.trim();
+      }
+      await _reload();
+      if (mounted) {
+        setState(() => _message = 'Folder renamed to "$newName".');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+        );
+      }
+    }
+  }
+
+  void _showFolderOptions(String folderName) {
+    showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Wrap(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 10),
+              child: Row(
+                children: [
+                  const Icon(Icons.folder_rounded, color: Color(0xFFE09F3E), size: 24),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      folderName,
+                      style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(),
+            ListTile(
+              leading: const Icon(Icons.drive_file_rename_outline_rounded),
+              title: const Text('Rename folder'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _renameFolder(folderName);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent),
+              title: const Text('Delete folder', style: TextStyle(color: Colors.redAccent)),
+              subtitle: const Text('Files will be kept in vault, unassigned'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _deleteFolder(folderName);
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _showFilters() async {
@@ -782,85 +895,16 @@ class _VaultScreenState extends State<VaultScreen> {
                   _filterChip('pdf', 'PDFs'),
                   const SizedBox(width: 8),
                   _filterChip('document', 'Docs'),
-                  const SizedBox(width: 12),
-                  // Folder selector pill
-                  PopupMenuButton<String?>(
-                    tooltip: 'Select folder',
-                    initialValue: _selectedFolder,
-                    onSelected: (val) {
-                      if (val == '__new__') {
-                        _createFolder();
-                      } else {
-                        setState(() => _selectedFolder = val);
-                      }
-                    },
-                    itemBuilder: (_) => [
-                      const PopupMenuItem<String?>(
-                        value: null,
-                        child: Text('All folders'),
-                      ),
-                      ...folders.map(
-                        (f) => PopupMenuItem<String?>(
-                          value: f,
-                          child: Text(f),
-                        ),
-                      ),
-                      const PopupMenuDivider(),
-                      const PopupMenuItem<String?>(
-                        value: '__new__',
-                        child: Row(
-                          children: [
-                            Icon(Icons.add_rounded, size: 18),
-                            SizedBox(width: 8),
-                            Text('New folder'),
-                          ],
-                        ),
-                      ),
-                    ],
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: _selectedFolder != null
-                            ? Theme.of(context).colorScheme.primaryContainer
-                            : Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.folder_outlined,
-                            size: 16,
-                            color: _selectedFolder != null
-                                ? Theme.of(context).colorScheme.primary
-                                : Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            _selectedFolder ?? 'Folders',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: _selectedFolder != null
-                                  ? Theme.of(context).colorScheme.onPrimaryContainer
-                                  : Theme.of(context).colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                          const SizedBox(width: 4),
-                          Icon(
-                            Icons.arrow_drop_down_rounded,
-                            size: 18,
-                            color: _selectedFolder != null
-                                ? Theme.of(context).colorScheme.primary
-                                : Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
                 ],
               ),
             ),
+
+            // Prominent Folders Section Outside on Screen
+            _buildFoldersSection(context, folders, _files),
+
+            // Active Folder Filter Indicator
+            if (_selectedFolder != null)
+              _buildActiveFolderBanner(context),
 
             if (_message != null)
               Container(
@@ -951,56 +995,363 @@ class _VaultScreenState extends State<VaultScreen> {
     );
   }
 
-  Widget _empty(BuildContext context) => Center(
-    child: SingleChildScrollView(
-      padding: const EdgeInsets.all(32),
+  Widget _empty(BuildContext context) {
+    final inFolder = _selectedFolder != null;
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 68,
+              height: 68,
+              decoration: BoxDecoration(
+                color: inFolder
+                    ? const Color(0xFFE09F3E).withValues(alpha: 0.15)
+                    : Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.4),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                inFolder ? Icons.folder_open_rounded : Icons.shield_outlined,
+                size: 34,
+                color: inFolder ? const Color(0xFFE09F3E) : Theme.of(context).colorScheme.primary,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              _query.isNotEmpty
+                  ? 'No files match "$_query"'
+                  : (inFolder ? 'Folder "$_selectedFolder" is empty' : 'Your vault is empty'),
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _query.isNotEmpty
+                  ? 'Check your spelling or reset the active filters.'
+                  : (inFolder
+                      ? 'No files in this folder yet. Tap below to store encrypted files here.'
+                      : 'Import photos or files to store them with zero-knowledge AES-256 encryption.'),
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 13,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                height: 1.4,
+              ),
+            ),
+            if (_query.isEmpty) ...[
+              const SizedBox(height: 20),
+              FilledButton.icon(
+                onPressed: _import,
+                icon: const Icon(Icons.add_rounded),
+                label: Text(inFolder ? 'Add files to $_selectedFolder' : 'Add files'),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFoldersSection(
+    BuildContext context,
+    List<String> folders,
+    List<VaultFile> allFiles,
+  ) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 8, bottom: 4),
       child: Column(
-        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 72,
-            height: 72,
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.4),
-              shape: BoxShape.circle,
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.folder_outlined,
+                      size: 17,
+                      color: colors.primary,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Folders',
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -0.2,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1.5),
+                      decoration: BoxDecoration(
+                        color: colors.primaryContainer.withValues(alpha: 0.5),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        '${folders.length}',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: colors.onPrimaryContainer,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                InkWell(
+                  onTap: _createFolder,
+                  borderRadius: BorderRadius.circular(10),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.add_rounded, size: 16, color: colors.primary),
+                        const SizedBox(width: 3),
+                        Text(
+                          'New folder',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: colors.primary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
-            child: Icon(
-              Icons.shield_outlined,
-              size: 36,
-              color: Theme.of(context).colorScheme.primary,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            _query.isEmpty
-                ? (_selectedFolder == null ? 'Your vault is empty' : 'Folder is empty')
-                : 'No files match "$_query"',
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 8),
-          Text(
-            _query.isEmpty
-                ? 'Import photos or files to store them with zero-knowledge AES-256 encryption.'
-                : 'Check your spelling or reset the active filters.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 13,
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-              height: 1.4,
+          SizedBox(
+            height: 72,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              children: [
+                _folderCard(
+                  title: 'All Files',
+                  count: allFiles.length,
+                  isSelected: _selectedFolder == null,
+                  icon: Icons.inventory_2_rounded,
+                  iconColor: colors.primary,
+                  onTap: () => setState(() => _selectedFolder = null),
+                ),
+                const SizedBox(width: 10),
+                ...folders.map((folder) {
+                  final count = allFiles.where((f) => f.folderName == folder).length;
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 10),
+                    child: _folderCard(
+                      title: folder,
+                      count: count,
+                      isSelected: _selectedFolder == folder,
+                      icon: Icons.folder_rounded,
+                      iconColor: const Color(0xFFE09F3E),
+                      onTap: () => setState(() => _selectedFolder = folder),
+                      onLongPress: () => _showFolderOptions(folder),
+                    ),
+                  );
+                }),
+                _addFolderCard(context),
+              ],
             ),
           ),
-          if (_query.isEmpty) ...[
-            const SizedBox(height: 20),
-            FilledButton.icon(
-              onPressed: _import,
-              icon: const Icon(Icons.add_rounded),
-              label: const Text('Add files'),
-            ),
-          ],
         ],
       ),
-    ),
-  );
+    );
+  }
+
+  Widget _folderCard({
+    required String title,
+    required int count,
+    required bool isSelected,
+    required IconData icon,
+    required Color iconColor,
+    required VoidCallback onTap,
+    VoidCallback? onLongPress,
+  }) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        onLongPress: onLongPress,
+        borderRadius: BorderRadius.circular(16),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          width: 132,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? colors.primaryContainer.withValues(alpha: 0.65)
+                : colors.surfaceContainerHighest.withValues(alpha: 0.38),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isSelected
+                  ? colors.primary
+                  : colors.outlineVariant.withValues(alpha: 0.4),
+              width: isSelected ? 1.6 : 1,
+            ),
+            boxShadow: isSelected
+                ? [
+                    BoxShadow(
+                      color: colors.primary.withValues(alpha: 0.1),
+                      blurRadius: 8,
+                      offset: const Offset(0, 3),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Row(
+                children: [
+                  Icon(icon, size: 20, color: iconColor),
+                  const Spacer(),
+                  if (onLongPress != null)
+                    GestureDetector(
+                      onTap: onLongPress,
+                      child: Icon(
+                        Icons.more_vert_rounded,
+                        size: 16,
+                        color: colors.onSurfaceVariant.withValues(alpha: 0.6),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
+                  color: isSelected ? colors.onPrimaryContainer : colors.onSurface,
+                ),
+              ),
+              Text(
+                '$count ${count == 1 ? 'file' : 'files'}',
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w500,
+                  color: isSelected
+                      ? colors.onPrimaryContainer.withValues(alpha: 0.8)
+                      : colors.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _addFolderCard(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: _createFolder,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          width: 96,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: colors.surfaceContainerHighest.withValues(alpha: 0.22),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: colors.outlineVariant.withValues(alpha: 0.4),
+            ),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.create_new_folder_outlined, size: 20, color: colors.primary),
+              const SizedBox(height: 4),
+              Text(
+                '+ New',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: colors.primary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildActiveFolderBanner(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: colors.primaryContainer.withValues(alpha: 0.35),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.folder_open_rounded, size: 17, color: Color(0xFFE09F3E)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Showing: $_selectedFolder',
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12.5,
+                  color: colors.onPrimaryContainer,
+                ),
+              ),
+            ),
+            InkWell(
+              onTap: () => setState(() => _selectedFolder = null),
+              borderRadius: BorderRadius.circular(10),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.close_rounded,
+                      size: 15,
+                      color: colors.onPrimaryContainer,
+                    ),
+                    const SizedBox(width: 3),
+                    Text(
+                      'Clear',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        color: colors.onPrimaryContainer,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   Widget _fileCard(BuildContext context, VaultFile file) {
     final theme = Theme.of(context);

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../data/api_client.dart';
+import '../data/firebase_sync_service.dart';
 import '../data/local_vault.dart';
 
 class DeviceSessionsScreen extends StatefulWidget {
@@ -30,6 +31,28 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
         _loading = true;
         _error = null;
       });
+    }
+    final fb = FirebaseSyncService(widget.vault);
+    if (fb.isAuthenticated) {
+      final user = fb.currentUser;
+      if (mounted) {
+        setState(() {
+          _devices = [
+            {
+              'id': user?.uid ?? 'current',
+              'name': 'This Android Phone (Active)',
+              'email': user?.email ?? '',
+              'created_at': user?.metadata.creationTime?.toIso8601String() ??
+                  DateTime.now().toIso8601String(),
+              'last_active_at': user?.metadata.lastSignInTime?.toIso8601String() ??
+                  DateTime.now().toIso8601String(),
+            }
+          ];
+          _currentId = user?.uid ?? 'current';
+          _loading = false;
+        });
+      }
+      return;
     }
     try {
       final devices = await _api.getDevices();

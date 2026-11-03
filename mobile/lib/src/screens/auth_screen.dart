@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../data/auth_service.dart';
@@ -26,9 +25,6 @@ class AuthScreen extends StatefulWidget {
 
 class _AuthScreenState extends State<AuthScreen>
     with SingleTickerProviderStateMixin {
-  static const _demoEmail = 'demo@keepsake.local';
-  static const _demoPassword = 'KeepsakeDemo!2026';
-
   late final TabController _tabController = TabController(
     length: 2,
     vsync: this,
@@ -49,6 +45,14 @@ class _AuthScreenState extends State<AuthScreen>
   bool get _isSignIn => _tabController.index == 0;
 
   @override
+  void initState() {
+    super.initState();
+    _tabController.addListener(() {
+      if (mounted) setState(() => _error = null);
+    });
+  }
+
+  @override
   void dispose() {
     _tabController.dispose();
     _signInEmail.dispose();
@@ -62,10 +66,7 @@ class _AuthScreenState extends State<AuthScreen>
   Future<void> _handleSignIn() async {
     final email = _signInEmail.text.trim().toLowerCase();
     final password = _signInPassword.text;
-    if (kDebugMode && email == _demoEmail && password == _demoPassword) {
-      await _openDemoVault();
-      return;
-    }
+
     if (email.isEmpty || password.isEmpty) {
       setState(() => _error = 'Enter your email and password to continue.');
       return;
@@ -97,6 +98,38 @@ class _AuthScreenState extends State<AuthScreen>
       );
       widget.onAuthSuccess();
     } catch (error) {
+      if (mounted) setState(() => _error = _friendlyError(error));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _handleGoogleSignIn() async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+
+    try {
+      final cred = await _firebaseSync.signInWithGoogle();
+      final user = cred.user;
+      if (user != null) {
+        final email = (user.email ?? 'google_user@keepsake.local').toLowerCase();
+        final password = user.uid;
+        await widget.vault.setMasterKeyFromCredentials(email, password);
+        await _authService.registerUser(
+          email: email,
+          password: password,
+          lockType: AuthLockType.password,
+          cloudAccount: true,
+        );
+        widget.onAuthSuccess();
+      }
+    } catch (error) {
+      final msg = error.toString();
+      if (msg.contains('cancelled') || msg.contains('canceled')) {
+        return;
+      }
       if (mounted) setState(() => _error = _friendlyError(error));
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -178,35 +211,6 @@ class _AuthScreenState extends State<AuthScreen>
     }
   }
 
-  Future<void> _openDemoVault() async {
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
-    try {
-      final existingEmail = await _authService.getUserEmail();
-      if (await _authService.isRegistered() &&
-          existingEmail?.toLowerCase() != _demoEmail) {
-        throw StateError(
-          'A different local account is already set up on this device. Sign in to it to keep its vault data.',
-        );
-      }
-
-      await widget.vault.setMasterKeyFromCredentials(_demoEmail, _demoPassword);
-      await _authService.registerUser(
-        email: _demoEmail,
-        password: _demoPassword,
-        lockType: AuthLockType.password,
-        cloudAccount: false,
-      );
-      widget.onAuthSuccess();
-    } catch (error) {
-      if (mounted) setState(() => _error = _friendlyError(error));
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
   String _friendlyError(Object error) {
     if (error is FirebaseAuthException) {
       switch (error.code) {
@@ -223,14 +227,20 @@ class _AuthScreenState extends State<AuthScreen>
           return 'Please enter a valid email address.';
         case 'network-request-failed':
           return 'Network error. Check your internet connection.';
+        case 'account-exists-with-different-credential':
+          return 'An account already exists with this email under a different sign-in method.';
         default:
           return error.message ?? 'Authentication failed.';
       }
     }
+    final str = error.toString();
+    if (str.contains('sign_in_failed') || str.contains('10') || str.contains('12500')) {
+      return 'Google Sign-In failed. Please sign in with email and password.';
+    }
     if (error is TimeoutException || error is SocketException) {
       return 'Network timeout. Please check your internet connection.';
     }
-    return error.toString().replaceFirst('Exception: ', '');
+    return str.replaceFirst('Exception: ', '').replaceFirst('StateError: ', '');
   }
 
   @override
@@ -247,7 +257,7 @@ class _AuthScreenState extends State<AuthScreen>
             colors: [
               colors.surface,
               Color.alphaBlend(
-                colors.primary.withValues(alpha: 0.045),
+                colors.primary.withValues(alpha: 0.04),
                 colors.surface,
               ),
             ],
@@ -257,57 +267,63 @@ class _AuthScreenState extends State<AuthScreen>
           child: LayoutBuilder(
             builder: (context, constraints) => Center(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(22, 14, 22, 28),
+                padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 460),
+                  constraints: const BoxConstraints(maxWidth: 440),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       const Center(
-                        child: KeepsakeLogo(size: 52, showWordmark: true),
+                        child: KeepsakeLogo(size: 60, showWordmark: true),
                       ),
-                      SizedBox(height: constraints.maxHeight < 720 ? 16 : 28),
-                      Text(
-                        _isSignIn
-                            ? 'Your files,\nwithin reach.'
-                            : 'A calmer place\nfor your files.',
-                        style: theme.textTheme.headlineMedium?.copyWith(
-                          fontWeight: FontWeight.w800,
-                          height: 1.06,
-                          letterSpacing: -1.3,
+                      const SizedBox(height: 24),
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 250),
+                        child: Column(
+                          key: ValueKey(_isSignIn),
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Text(
+                              _isSignIn
+                                  ? 'Your files,\nwithin reach.'
+                                  : 'A calmer place\nfor your files.',
+                              style: theme.textTheme.headlineMedium?.copyWith(
+                                fontWeight: FontWeight.w800,
+                                height: 1.1,
+                                letterSpacing: -1.2,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            Text(
+                              _isSignIn
+                                  ? 'Sign in to access your encrypted vault. Files stay securely available offline.'
+                                  : 'Create your private vault. Unlock with biometrics, pin, or password anytime.',
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: colors.onSurfaceVariant,
+                                height: 1.45,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      const SizedBox(height: 12),
-                      Text(
-                        _isSignIn
-                            ? 'Sign in to your private vault. Your local files stay available offline.'
-                            : 'Create your private vault. You can choose biometrics or another unlock method later in Settings.',
-                        style: theme.textTheme.bodyLarge?.copyWith(
-                          color: colors.onSurfaceVariant,
-                          height: 1.45,
-                        ),
-                      ),
-                      const SizedBox(height: 18),
+                      const SizedBox(height: 24),
                       _buildAuthPanel(theme),
-                      if (kDebugMode && _isSignIn) ...[
-                        const SizedBox(height: 14),
-                        _buildDemoCard(theme),
-                      ],
-                      const SizedBox(height: 18),
+                      const SizedBox(height: 24),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Icon(
-                            Icons.lock_outline,
+                            Icons.lock_outline_rounded,
                             size: 15,
                             color: colors.primary,
                           ),
-                          const SizedBox(width: 7),
+                          const SizedBox(width: 8),
                           Flexible(
                             child: Text(
-                              'Encrypted on this device · Works offline',
+                              'Encrypted on this device · Zero-knowledge privacy',
                               style: theme.textTheme.bodySmall?.copyWith(
                                 color: colors.onSurfaceVariant,
+                                fontWeight: FontWeight.w500,
                               ),
                             ),
                           ),
@@ -327,16 +343,16 @@ class _AuthScreenState extends State<AuthScreen>
   Widget _buildAuthPanel(ThemeData theme) {
     final colors = theme.colorScheme;
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
-        color: colors.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(26),
-        border: Border.all(color: colors.outlineVariant.withValues(alpha: 0.6)),
+        color: colors.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: colors.outlineVariant.withValues(alpha: 0.5)),
         boxShadow: [
           BoxShadow(
-            color: colors.shadow.withValues(alpha: 0.045),
-            blurRadius: 24,
-            offset: const Offset(0, 10),
+            color: colors.shadow.withValues(alpha: 0.05),
+            blurRadius: 28,
+            offset: const Offset(0, 12),
           ),
         ],
       ),
@@ -346,8 +362,8 @@ class _AuthScreenState extends State<AuthScreen>
           Container(
             padding: const EdgeInsets.all(4),
             decoration: BoxDecoration(
-              color: colors.surfaceContainerHighest.withValues(alpha: 0.65),
-              borderRadius: BorderRadius.circular(15),
+              color: colors.surfaceContainerHighest.withValues(alpha: 0.5),
+              borderRadius: BorderRadius.circular(16),
             ),
             child: TabBar(
               controller: _tabController,
@@ -355,16 +371,19 @@ class _AuthScreenState extends State<AuthScreen>
               indicatorSize: TabBarIndicatorSize.tab,
               indicator: BoxDecoration(
                 color: colors.surface,
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(13),
                 boxShadow: [
                   BoxShadow(
-                    color: colors.shadow.withValues(alpha: 0.07),
-                    blurRadius: 7,
+                    color: colors.shadow.withValues(alpha: 0.08),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
                   ),
                 ],
               ),
               labelColor: colors.primary,
               unselectedLabelColor: colors.onSurfaceVariant,
+              labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+              unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500, fontSize: 14),
               dividerColor: Colors.transparent,
               tabs: const [
                 Tab(text: 'Sign in'),
@@ -372,14 +391,16 @@ class _AuthScreenState extends State<AuthScreen>
               ],
             ),
           ),
-          const SizedBox(height: 22),
+          const SizedBox(height: 20),
+          _buildGoogleButton(theme),
+          _buildOrDivider(theme),
           if (_error != null) ...[
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               decoration: BoxDecoration(
                 color: colors.errorContainer.withValues(alpha: 0.7),
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: colors.error.withValues(alpha: 0.3)),
+                border: Border.all(color: colors.error.withValues(alpha: 0.25)),
               ),
               child: Row(
                 children: [
@@ -408,12 +429,78 @@ class _AuthScreenState extends State<AuthScreen>
           AnimatedBuilder(
             animation: _tabController,
             builder: (context, _) => AnimatedSwitcher(
-              duration: const Duration(milliseconds: 220),
+              duration: const Duration(milliseconds: 240),
               switchInCurve: Curves.easeOutCubic,
               switchOutCurve: Curves.easeInCubic,
               child: _tabController.index == 0
                   ? _buildSignInForm(theme)
                   : _buildRegisterForm(theme),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGoogleButton(ThemeData theme) {
+    final colors = theme.colorScheme;
+    return OutlinedButton(
+      onPressed: _busy ? null : _handleGoogleSignIn,
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+        side: BorderSide(color: colors.outlineVariant),
+        backgroundColor: colors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        elevation: 0,
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          CustomPaint(
+            size: const Size(20, 20),
+            painter: _GoogleLogoPainter(),
+          ),
+          const SizedBox(width: 12),
+          Text(
+            _isSignIn ? 'Continue with Google' : 'Sign up with Google',
+            style: TextStyle(
+              fontSize: 14.5,
+              fontWeight: FontWeight.w700,
+              color: colors.onSurface,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOrDivider(ThemeData theme) {
+    final colors = theme.colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 18),
+      child: Row(
+        children: [
+          Expanded(
+            child: Divider(
+              color: colors.outlineVariant.withValues(alpha: 0.6),
+              thickness: 1,
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            child: Text(
+              'or continue with email',
+              style: TextStyle(
+                fontSize: 12,
+                color: colors.onSurfaceVariant,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Divider(
+              color: colors.outlineVariant.withValues(alpha: 0.6),
+              thickness: 1,
             ),
           ),
         ],
@@ -448,7 +535,7 @@ class _AuthScreenState extends State<AuthScreen>
           ),
         ),
       ),
-      const SizedBox(height: 8),
+      const SizedBox(height: 6),
       _submitButton(
         label: 'Sign in to vault',
         icon: Icons.lock_open_rounded,
@@ -514,15 +601,24 @@ class _AuthScreenState extends State<AuthScreen>
     enableSuggestions: false,
     decoration: InputDecoration(
       labelText: label,
-      prefixIcon: Icon(icon),
+      prefixIcon: Icon(icon, size: 20),
       filled: true,
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(15)),
+      fillColor: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(15),
+        borderRadius: BorderRadius.circular(16),
         borderSide: BorderSide(
-          color: Theme.of(context).colorScheme.outlineVariant,
+          color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.6),
         ),
       ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: BorderSide(
+          color: Theme.of(context).colorScheme.primary,
+          width: 1.6,
+        ),
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
     ),
   );
 
@@ -537,20 +633,29 @@ class _AuthScreenState extends State<AuthScreen>
     enableSuggestions: false,
     decoration: InputDecoration(
       labelText: label,
-      prefixIcon: const Icon(Icons.lock_outline_rounded),
+      prefixIcon: const Icon(Icons.lock_outline_rounded, size: 20),
       suffixIcon: IconButton(
         tooltip: _showPassword ? 'Hide password' : 'Show password',
         onPressed: () => setState(() => _showPassword = !_showPassword),
-        icon: Icon(_showPassword ? Icons.visibility_off : Icons.visibility),
+        icon: Icon(_showPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined, size: 20),
       ),
       filled: true,
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(15)),
+      fillColor: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(15),
+        borderRadius: BorderRadius.circular(16),
         borderSide: BorderSide(
-          color: Theme.of(context).colorScheme.outlineVariant,
+          color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.6),
         ),
       ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: BorderSide(
+          color: Theme.of(context).colorScheme.primary,
+          width: 1.6,
+        ),
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
     ),
   );
 
@@ -559,66 +664,83 @@ class _AuthScreenState extends State<AuthScreen>
     required IconData icon,
     required Future<void> Function() onPressed,
   }) => SizedBox(
-    height: 54,
+    height: 52,
     child: FilledButton.icon(
       onPressed: _busy ? null : onPressed,
       icon: _busy
           ? const SizedBox.square(
               dimension: 19,
-              child: CircularProgressIndicator(strokeWidth: 2.3),
+              child: CircularProgressIndicator(strokeWidth: 2.3, color: Colors.white),
             )
-          : Icon(icon),
+          : Icon(icon, size: 19),
       label: Text(_busy ? 'Please wait…' : label),
       style: FilledButton.styleFrom(
-        textStyle: const TextStyle(fontWeight: FontWeight.w700),
+        textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        elevation: 1,
       ),
     ),
   );
+}
 
-  Widget _buildDemoCard(ThemeData theme) => Container(
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      color: theme.colorScheme.secondaryContainer.withValues(alpha: 0.55),
-      borderRadius: BorderRadius.circular(20),
-      border: Border.all(
-        color: theme.colorScheme.secondary.withValues(alpha: 0.22),
-      ),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Wrap(
-          spacing: 8,
-          runSpacing: 4,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            Icon(Icons.science_outlined, color: theme.colorScheme.secondary),
-            Text(
-              'Demo access',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const Chip(label: Text('DEBUG')),
-          ],
-        ),
-        const SizedBox(height: 5),
-        Text(
-          'Local sample account · does not contact a server',
-          style: theme.textTheme.bodySmall,
-        ),
-        const SizedBox(height: 12),
-        SelectableText('Email  $_demoEmail'),
-        const SizedBox(height: 3),
-        SelectableText('Password  $_demoPassword'),
-        const SizedBox(height: 12),
-        OutlinedButton.icon(
-          onPressed: _busy ? null : _openDemoVault,
-          icon: const Icon(Icons.play_arrow_rounded),
-          label: const Text('Open demo vault'),
-        ),
-      ],
-    ),
-  );
+class _GoogleLogoPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final double w = size.width;
+    final double h = size.height;
+    final double stroke = w * 0.22;
+    final center = Offset(w / 2, h / 2);
+    final radius = (w - stroke) / 2;
+    final rect = Rect.fromCircle(center: center, radius: radius);
+
+    // Red arc (top)
+    final redPaint = Paint()
+      ..color = const Color(0xFFEA4335)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..strokeCap = StrokeCap.butt;
+    canvas.drawArc(rect, -3.14159 * 0.72, 3.14159 * 0.52, false, redPaint);
+
+    // Yellow arc (bottom-left)
+    final yellowPaint = Paint()
+      ..color = const Color(0xFFFBBC05)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..strokeCap = StrokeCap.butt;
+    canvas.drawArc(rect, 3.14159 * 0.65, 3.14159 * 0.55, false, yellowPaint);
+
+    // Green arc (bottom)
+    final greenPaint = Paint()
+      ..color = const Color(0xFF34A853)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..strokeCap = StrokeCap.butt;
+    canvas.drawArc(rect, 3.14159 * 0.08, 3.14159 * 0.57, false, greenPaint);
+
+    // Blue arc (right)
+    final bluePaint = Paint()
+      ..color = const Color(0xFF4285F4)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..strokeCap = StrokeCap.butt;
+    canvas.drawArc(rect, -3.14159 * 0.2, 3.14159 * 0.28, false, bluePaint);
+
+    // Blue horizontal bar
+    final barPaint = Paint()
+      ..color = const Color(0xFF4285F4)
+      ..style = PaintingStyle.fill;
+    final barRect = Rect.fromLTRB(
+      center.dx - stroke * 0.1,
+      center.dy - stroke / 2,
+      center.dx + radius + stroke / 2,
+      center.dy + stroke / 2,
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(barRect, Radius.circular(stroke * 0.2)),
+      barPaint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

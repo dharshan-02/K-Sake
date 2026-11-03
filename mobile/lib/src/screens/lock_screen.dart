@@ -98,11 +98,12 @@ class _LockScreenState extends State<LockScreen> {
         setState(() => _unlockCelebration = true);
         await Future<void>.delayed(const Duration(milliseconds: 850));
         if (mounted) widget.onUnlock(false);
-      } else {
-        setState(() => _error = 'Authentication cancelled.');
       }
     } catch (e) {
-      setState(() => _error = 'Biometric check failed: $e');
+      final errStr = e.toString();
+      if (!errStr.contains('userCanceled') && !errStr.contains('authInProgress')) {
+        setState(() => _error = 'Biometrics failed. Use your PIN or Password.');
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
