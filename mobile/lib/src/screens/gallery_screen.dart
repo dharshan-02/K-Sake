@@ -4,6 +4,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../data/api_client.dart';
+import '../data/firebase_sync_service.dart';
 import '../data/local_vault.dart';
 import '../models/vault_file.dart';
 import 'file_preview_screen.dart';
@@ -24,6 +25,7 @@ class GalleryScreen extends StatefulWidget {
 
 class _GalleryScreenState extends State<GalleryScreen> {
   late final ApiClient _api = ApiClient(widget.vault);
+  late final FirebaseSyncService _firebaseSync = FirebaseSyncService(widget.vault);
   List<VaultFile> _mediaFiles = [];
   List<Map<String, dynamic>> _cloudMedia = [];
   final Set<String> _busyIds = {};
@@ -61,17 +63,26 @@ class _GalleryScreenState extends State<GalleryScreen> {
   Future<void> _loadMedia() async {
     if (mounted) setState(() => _loading = true);
     try {
-      _hasCloudSession = !widget.isHiddenVault && await _api.hasSession;
+      final isCloud = _firebaseSync.isAuthenticated || await _api.hasSession;
+      _hasCloudSession = !widget.isHiddenVault && isCloud;
       if (_showCloud && !widget.isHiddenVault) {
-        final files = await _api.listCloudFiles();
-        _cloudMedia = files
-            .where(
-              (file) => _isMedia(
-                file['mimeType'] as String? ?? '',
-                file['name'] as String? ?? '',
-              ),
-            )
-            .toList();
+        if (!_hasCloudSession) {
+          _cloudMedia = [];
+          _message = 'Sign in with an account to view and sync cloud media.';
+        } else {
+          final files = _firebaseSync.isAuthenticated
+              ? await _firebaseSync.listCloudFiles()
+              : await _api.listCloudFiles();
+          _cloudMedia = files
+              .where(
+                (file) => _isMedia(
+                  file['mimeType'] as String? ?? '',
+                  file['name'] as String? ?? '',
+                ),
+              )
+              .toList();
+          _message = null;
+        }
       } else {
         final files = await widget.vault.listFiles(
           isHidden: widget.isHiddenVault,
@@ -79,9 +90,10 @@ class _GalleryScreenState extends State<GalleryScreen> {
         _mediaFiles = files
             .where((file) => _isMedia(file.mimeType, file.name))
             .toList();
+        _message = null;
       }
     } catch (error) {
-      _message = error.toString().replaceFirst('Exception: ', '');
+      _message = error.toString().replaceFirst('Exception: ', '').replaceFirst('Bad state: ', '');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -141,16 +153,23 @@ class _GalleryScreenState extends State<GalleryScreen> {
         isHidden: widget.isHiddenVault,
       );
       var syncNote = '';
-      if (!widget.isHiddenVault && await _api.hasSession) {
+      if (!widget.isHiddenVault && (_firebaseSync.isAuthenticated || await _api.hasSession)) {
         try {
-          final summary = await _api.syncAll(downloadMissing: false);
-          syncNote = summary.uploaded > 0
-              ? ' ${summary.uploaded} uploaded.'
+          final int uploadedCount;
+          if (_firebaseSync.isAuthenticated) {
+            final res = await _firebaseSync.syncAll(downloadMissing: false);
+            uploadedCount = res.uploaded;
+          } else {
+            final res = await _api.syncAll(downloadMissing: false);
+            uploadedCount = res.uploaded;
+          }
+          syncNote = uploadedCount > 0
+              ? ' $uploadedCount uploaded.'
               : ' Check each file’s status for sync details.';
-          if (summary.uploaded > 0) {
+          if (uploadedCount > 0) {
             await widget.vault.addNotification(
               'Gallery uploads complete',
-              '${summary.uploaded} media file${summary.uploaded == 1 ? '' : 's'} synced.',
+              '$uploadedCount media file${uploadedCount == 1 ? '' : 's'} synced.',
               type: 'upload',
             );
           }
@@ -184,15 +203,19 @@ class _GalleryScreenState extends State<GalleryScreen> {
       _message = null;
     });
     try {
-      await _api.uploadSingleFile(
-        file,
-        onProgress: (sent, total) {
-          if (!mounted) return;
-          setState(
-            () => _uploadProgress[file.id] = total == 0 ? 0 : sent / total,
-          );
-        },
-      );
+      if (_firebaseSync.isAuthenticated) {
+        await _firebaseSync.uploadFile(file);
+      } else {
+        await _api.uploadSingleFile(
+          file,
+          onProgress: (sent, total) {
+            if (!mounted) return;
+            setState(
+              () => _uploadProgress[file.id] = total == 0 ? 0 : sent / total,
+            );
+          },
+        );
+      }
       await widget.vault.addNotification(
         'Gallery upload complete',
         file.name,
@@ -227,7 +250,11 @@ class _GalleryScreenState extends State<GalleryScreen> {
       _message = null;
     });
     try {
-      await _api.downloadToVault(file);
+      if (_firebaseSync.isAuthenticated) {
+        await _firebaseSync.downloadToVault(file);
+      } else {
+        await _api.downloadToVault(file);
+      }
       await widget.vault.addNotification(
         'Media downloaded',
         file['name'] as String,
