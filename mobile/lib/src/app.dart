@@ -155,6 +155,11 @@ class _AppRootFlowState extends State<AppRootFlow> with WidgetsBindingObserver {
               _state = _FlowState.locked;
             });
           },
+          onLogout: () {
+            setState(() {
+              _state = _FlowState.auth;
+            });
+          },
         );
     }
   }

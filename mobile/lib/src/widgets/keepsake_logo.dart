@@ -32,7 +32,7 @@ class KeepsakeLogo extends StatelessWidget {
         width: size,
         height: size,
         fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => Center(
+        errorBuilder: (context, error, stackTrace) => Center(
           child: FlutterLogo(size: size * 0.65),
         ),
       ),

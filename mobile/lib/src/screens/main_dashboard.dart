@@ -18,11 +18,13 @@ class MainDashboard extends StatefulWidget {
     required this.vault,
     required this.isHiddenVault,
     required this.onLock,
+    this.onLogout,
   });
 
   final LocalVault vault;
   final bool isHiddenVault;
   final VoidCallback onLock;
+  final VoidCallback? onLogout;
 
   @override
   State<MainDashboard> createState() => _MainDashboardState();
@@ -79,7 +81,10 @@ class _MainDashboardState extends State<MainDashboard> {
       appBar: AppBar(
         title: Row(
           children: [
-            if (!_hiddenMode) const KeepsakeLogo(size: 32),
+            if (!_hiddenMode) ...[
+              const KeepsakeLogo(size: 32),
+              const SizedBox(width: 10),
+            ],
             if (_hiddenMode) ...[
               const Icon(Icons.shield_moon, color: Colors.amber, size: 24),
               const SizedBox(width: 8),
@@ -154,6 +159,42 @@ class _MainDashboardState extends State<MainDashboard> {
             icon: const Icon(Icons.lock_outline),
             tooltip: 'Lock Vault',
             onPressed: widget.onLock,
+          ),
+          IconButton(
+            icon: const Icon(Icons.logout_rounded, color: Colors.redAccent),
+            tooltip: 'Log out',
+            onPressed: () async {
+              final confirmed = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: const Text('Log out?'),
+                  content: const Text(
+                    'Your files remain encrypted on this device. Logging out returns you to the login screen.',
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx, false),
+                      child: const Text('Cancel'),
+                    ),
+                    FilledButton(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: Colors.redAccent,
+                      ),
+                      onPressed: () => Navigator.pop(ctx, true),
+                      child: const Text('Log out'),
+                    ),
+                  ],
+                ),
+              );
+              if (confirmed == true) {
+                await FirebaseSyncService(widget.vault).signOut();
+                if (widget.onLogout != null) {
+                  widget.onLogout!();
+                } else {
+                  widget.onLock();
+                }
+              }
+            },
           ),
         ],
       ),
