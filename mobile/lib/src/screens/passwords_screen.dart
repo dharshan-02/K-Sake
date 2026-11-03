@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:uuid/uuid.dart';
 
 import '../data/local_vault.dart';
+import '../data/firebase_sync_service.dart';
 import '../models/vault_credential.dart';
 
 class PasswordsScreen extends StatefulWidget {
@@ -132,6 +133,7 @@ class _PasswordsScreenState extends State<PasswordsScreen> {
                           onPressed: () async {
                             Navigator.pop(ctx);
                             await widget.vault.deleteCredential(existing.id);
+                            FirebaseSyncService(widget.vault).deleteCloudCredential(existing.id);
                             _loadCredentials();
                           },
                         ),
@@ -168,6 +170,7 @@ class _PasswordsScreenState extends State<PasswordsScreen> {
                             updatedAt: now,
                           );
                           await widget.vault.saveCredential(cred);
+                          FirebaseSyncService(widget.vault).uploadCredential(cred);
                           if (ctx.mounted) Navigator.pop(ctx);
                           _loadCredentials();
                         },

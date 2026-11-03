@@ -5,7 +5,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-import '../data/api_client.dart';
 import '../data/auth_service.dart';
 import '../data/firebase_sync_service.dart';
 import '../data/local_vault.dart';
@@ -35,7 +34,6 @@ class _AuthScreenState extends State<AuthScreen>
     vsync: this,
   );
   final _authService = AuthService();
-  late final ApiClient _apiClient = ApiClient(widget.vault);
   late final FirebaseSyncService _firebaseSync = FirebaseSyncService(widget.vault);
 
   final _signInEmail = TextEditingController();
@@ -45,7 +43,6 @@ class _AuthScreenState extends State<AuthScreen>
   final _confirmPassword = TextEditingController();
 
   bool _showPassword = false;
-  final bool _deviceOnly = false;
   bool _busy = false;
   String? _error;
 
@@ -88,30 +85,15 @@ class _AuthScreenState extends State<AuthScreen>
         return;
       }
 
-      if (_deviceOnly) {
-        throw StateError(
-          'There is no matching account saved on this device. Connect to your account or create a device-only vault.',
-        );
-      }
-
-      // Try Firebase Auth first (Free Cloud Sync anywhere), then backend API
-      try {
-        await _firebaseSync.signIn(email, password);
-      } catch (fbErr) {
-        debugPrint('Firebase sign in notice: $fbErr');
-        try {
-          await _apiClient.authenticate(email, password, createAccount: false);
-        } catch (_) {
-          rethrow;
-        }
-      }
+      // Firebase Authentication
+      await _firebaseSync.signIn(email, password);
 
       await widget.vault.setMasterKeyFromCredentials(email, password);
       await _authService.registerUser(
         email: email,
         password: password,
         lockType: AuthLockType.password,
-        cloudAccount: !_deviceOnly,
+        cloudAccount: true,
       );
       widget.onAuthSuccess();
     } catch (error) {
@@ -130,8 +112,8 @@ class _AuthScreenState extends State<AuthScreen>
       setState(() => _error = 'Enter a valid email address.');
       return;
     }
-    if (password.length < 12) {
-      setState(() => _error = 'Use at least 12 characters for your password.');
+    if (password.length < 8) {
+      setState(() => _error = 'Use at least 8 characters for your master password.');
       return;
     }
     if (password != confirmation) {
@@ -145,31 +127,52 @@ class _AuthScreenState extends State<AuthScreen>
     });
 
     try {
-      if (!_deviceOnly) {
-        try {
-          await _firebaseSync.signUp(email, password);
-        } catch (fbErr) {
-          debugPrint('Firebase register notice: $fbErr');
-          try {
-            await _apiClient.authenticate(email, password, createAccount: true);
-          } catch (_) {
-            rethrow;
-          }
-        }
-      }
+      // Firebase Account Creation
+      await _firebaseSync.signUp(email, password);
 
       await widget.vault.setMasterKeyFromCredentials(email, password);
-      // A new account starts with its master password as the local unlock
-      // method. Users can choose biometrics, a PIN, or a pattern in Settings.
       await _authService.registerUser(
         email: email,
         password: password,
         lockType: AuthLockType.password,
-        cloudAccount: !_deviceOnly,
+        cloudAccount: true,
       );
       widget.onAuthSuccess();
     } catch (error) {
       if (mounted) setState(() => _error = _friendlyError(error));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _handleForgotPassword() async {
+    final email = _signInEmail.text.trim();
+    if (email.isEmpty || !email.contains('@')) {
+      setState(() => _error = 'Enter your email in the field above to receive a reset link.');
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      await _firebaseSync.sendPasswordReset(email);
+      if (mounted) {
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Password Reset Sent'),
+            content: Text(
+              'A reset link has been dispatched to $email. Follow the link to change your password.',
+            ),
+            actions: [
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) setState(() => _error = _friendlyError(e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -224,76 +227,10 @@ class _AuthScreenState extends State<AuthScreen>
           return error.message ?? 'Authentication failed.';
       }
     }
-    if (error is ApiConnectionException) return error.message;
     if (error is TimeoutException || error is SocketException) {
-      return 'Keepsake could not reach the server. Check your connection and API address, or use a local account on this device.';
-    }
-    if (error is FormatException) {
-      return 'The server response was invalid. Check that the Keepsake API is running the expected version.';
+      return 'Network timeout. Please check your internet connection.';
     }
     return error.toString().replaceFirst('Exception: ', '');
-  }
-
-  Future<void> _configureServerUrl() async {
-    final controller = TextEditingController(
-      text: await ApiClient.getBaseUrl(),
-    );
-    if (!mounted) return;
-    final updated = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Server address'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Text(
-              'Cloud sign-in needs the Keepsake API and database to be running. 10.0.2.2 only works in the Android emulator. On a physical phone, enter your computer’s Wi-Fi address, for example http://192.168.1.20:3000/v1. Keep both devices on the same Wi-Fi and use HTTPS for a public server.',
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: controller,
-              keyboardType: TextInputType.url,
-              decoration: const InputDecoration(
-                labelText: 'API base URL',
-                hintText: 'http://10.0.2.2:3000/v1',
-              ),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              'HTTP is for local development only. Use HTTPS for a deployed server.',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text.trim()),
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
-    if (updated == null || updated.isEmpty) return;
-    try {
-      final uri = Uri.parse(updated);
-      if (!uri.hasScheme || uri.host.isEmpty) {
-        throw const FormatException('Enter a complete server URL.');
-      }
-      await ApiClient.setBaseUrl(updated);
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Server address saved.')));
-      }
-    } catch (error) {
-      if (mounted) setState(() => _error = _friendlyError(error));
-    }
   }
 
   @override
@@ -326,19 +263,10 @@ class _AuthScreenState extends State<AuthScreen>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Row(
-                        children: [
-                          const Expanded(
-                            child: KeepsakeLogo(size: 46, showWordmark: true),
-                          ),
-                          IconButton(
-                            tooltip: 'Server address',
-                            onPressed: _configureServerUrl,
-                            icon: const Icon(Icons.tune_rounded),
-                          ),
-                        ],
+                      const Center(
+                        child: KeepsakeLogo(size: 52, showWordmark: true),
                       ),
-                      SizedBox(height: constraints.maxHeight < 720 ? 14 : 28),
+                      SizedBox(height: constraints.maxHeight < 720 ? 16 : 28),
                       Text(
                         _isSignIn
                             ? 'Your files,\nwithin reach.'
@@ -506,7 +434,21 @@ class _AuthScreenState extends State<AuthScreen>
       ),
       const SizedBox(height: 14),
       _passwordInput(_signInPassword, label: 'Password'),
-      const SizedBox(height: 20),
+      Align(
+        alignment: Alignment.centerRight,
+        child: TextButton(
+          onPressed: _busy ? null : _handleForgotPassword,
+          child: Text(
+            'Forgot password?',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: theme.colorScheme.primary,
+            ),
+          ),
+        ),
+      ),
+      const SizedBox(height: 8),
       _submitButton(
         label: 'Sign in to vault',
         icon: Icons.lock_open_rounded,

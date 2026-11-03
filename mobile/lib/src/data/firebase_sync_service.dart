@@ -6,7 +6,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../models/vault_credential.dart';
 import '../models/vault_file.dart';
+import '../models/vault_note.dart';
 import 'local_vault.dart';
 
 class FirebaseSyncService {
@@ -16,11 +18,13 @@ class FirebaseSyncService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  static const int _chunkSize = 650 * 1024; // ~650 KB to stay well within Firestore 1 MB document limit
+  static const int _chunkSize = 650 * 1024; // ~650 KB to stay within Firestore 1 MB document limit
 
   User? get currentUser => _auth.currentUser;
   bool get isAuthenticated => _auth.currentUser != null;
   String? get userEmail => _auth.currentUser?.email;
+
+  // --- Auth Operations ---
 
   Future<UserCredential> signIn(String email, String password) async {
     final credential = await _auth.signInWithEmailAndPassword(
@@ -40,9 +44,15 @@ class FirebaseSyncService {
     return credential;
   }
 
+  Future<void> sendPasswordReset(String email) async {
+    await _auth.sendPasswordResetEmail(email: email.trim());
+  }
+
   Future<void> signOut() async {
     await _auth.signOut();
   }
+
+  // --- Document References ---
 
   DocumentReference<Map<String, dynamic>> _userDoc(String uid) =>
       _firestore.collection('users').doc(uid);
@@ -50,7 +60,14 @@ class FirebaseSyncService {
   CollectionReference<Map<String, dynamic>> _filesCollection(String uid) =>
       _userDoc(uid).collection('files');
 
-  /// Upload an encrypted local vault file to Cloud Firestore
+  CollectionReference<Map<String, dynamic>> _notesCollection(String uid) =>
+      _userDoc(uid).collection('notes');
+
+  CollectionReference<Map<String, dynamic>> _credentialsCollection(String uid) =>
+      _userDoc(uid).collection('credentials');
+
+  // --- File Storage in Firestore ---
+
   Future<void> uploadFile(VaultFile file) async {
     final user = _auth.currentUser;
     if (user == null) throw StateError('Sign in with your email to upload files.');
@@ -65,23 +82,21 @@ class FirebaseSyncService {
       final bytes = await localFile.readAsBytes();
       final totalLength = bytes.length;
       final fileRef = _filesCollection(user.uid).doc(file.id);
-
       final now = DateTime.now().toUtc();
 
       if (totalLength <= _chunkSize) {
-        // Single document upload
         await fileRef.set({
           'id': file.id,
           'name': file.name,
           'mimeType': file.mimeType,
           'size': file.size,
+          'folderName': file.folderName,
           'createdAt': file.createdAt.toUtc().toIso8601String(),
           'updatedAt': now.toIso8601String(),
           'chunkCount': 1,
           'ciphertext': base64Encode(bytes),
         });
       } else {
-        // Chunked upload for larger files
         final chunkCount = (totalLength / _chunkSize).ceil();
         final chunksRef = fileRef.collection('chunks');
 
@@ -90,6 +105,7 @@ class FirebaseSyncService {
           'name': file.name,
           'mimeType': file.mimeType,
           'size': file.size,
+          'folderName': file.folderName,
           'createdAt': file.createdAt.toUtc().toIso8601String(),
           'updatedAt': now.toIso8601String(),
           'chunkCount': chunkCount,
@@ -115,7 +131,21 @@ class FirebaseSyncService {
     }
   }
 
-  /// List all files backed up in the user's Firestore cloud account
+  Future<void> deleteCloudFile(String fileId) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+    try {
+      final fileRef = _filesCollection(user.uid).doc(fileId);
+      final chunksSnap = await fileRef.collection('chunks').get();
+      for (final doc in chunksSnap.docs) {
+        await doc.reference.delete();
+      }
+      await fileRef.delete();
+    } catch (e) {
+      debugPrint('Error deleting cloud file: $e');
+    }
+  }
+
   Future<List<Map<String, dynamic>>> listCloudFiles() async {
     final user = _auth.currentUser;
     if (user == null) throw StateError('Sign in to view your cloud files.');
@@ -124,7 +154,6 @@ class FirebaseSyncService {
     return snapshot.docs.map((doc) => doc.data()).toList();
   }
 
-  /// Download an encrypted file from Cloud Firestore and decrypt it to the local vault
   Future<void> downloadToVault(Map<String, dynamic> fileData) async {
     final user = _auth.currentUser;
     if (user == null) throw StateError('Sign in to download files.');
@@ -167,15 +196,130 @@ class FirebaseSyncService {
     }
   }
 
-  /// Bi-directional sync: uploads queued local files & downloads missing cloud files
+  // --- Notes Storage in Firestore ---
+
+  Future<void> uploadNote(VaultNote note) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+    try {
+      await _notesCollection(user.uid).doc(note.id).set({
+        'id': note.id,
+        'title': note.title,
+        'content': note.content,
+        'colorValue': note.colorValue,
+        'isPinned': note.isPinned,
+        'isHidden': note.isHidden,
+        'createdAt': note.createdAt.toUtc().toIso8601String(),
+        'updatedAt': note.updatedAt.toUtc().toIso8601String(),
+      });
+    } catch (e) {
+      debugPrint('Firestore uploadNote error: $e');
+    }
+  }
+
+  Future<void> deleteCloudNote(String noteId) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+    try {
+      await _notesCollection(user.uid).doc(noteId).delete();
+    } catch (e) {
+      debugPrint('Firestore deleteCloudNote error: $e');
+    }
+  }
+
+  Future<List<VaultNote>> listCloudNotes() async {
+    final user = _auth.currentUser;
+    if (user == null) return [];
+    try {
+      final snapshot = await _notesCollection(user.uid).get();
+      return snapshot.docs.map((doc) {
+        final data = doc.data();
+        return VaultNote(
+          id: data['id'] as String? ?? doc.id,
+          title: data['title'] as String? ?? '',
+          content: data['content'] as String? ?? '',
+          colorValue: (data['colorValue'] as num?)?.toInt() ?? 0xFF1E293B,
+          isPinned: data['isPinned'] as bool? ?? false,
+          isHidden: data['isHidden'] as bool? ?? false,
+          createdAt: DateTime.tryParse(data['createdAt'] as String? ?? '') ?? DateTime.now(),
+          updatedAt: DateTime.tryParse(data['updatedAt'] as String? ?? '') ?? DateTime.now(),
+        );
+      }).toList();
+    } catch (e) {
+      debugPrint('Firestore listCloudNotes error: $e');
+      return [];
+    }
+  }
+
+  // --- Passwords & Credentials Storage in Firestore ---
+
+  Future<void> uploadCredential(VaultCredential cred) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+    try {
+      await _credentialsCollection(user.uid).doc(cred.id).set({
+        'id': cred.id,
+        'title': cred.title,
+        'username': cred.username,
+        'password': cred.password,
+        'url': cred.url,
+        'notes': cred.notes,
+        'category': cred.category,
+        'isHidden': cred.isHidden,
+        'createdAt': cred.createdAt.toUtc().toIso8601String(),
+        'updatedAt': cred.updatedAt.toUtc().toIso8601String(),
+      });
+    } catch (e) {
+      debugPrint('Firestore uploadCredential error: $e');
+    }
+  }
+
+  Future<void> deleteCloudCredential(String credId) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+    try {
+      await _credentialsCollection(user.uid).doc(credId).delete();
+    } catch (e) {
+      debugPrint('Firestore deleteCloudCredential error: $e');
+    }
+  }
+
+  Future<List<VaultCredential>> listCloudCredentials() async {
+    final user = _auth.currentUser;
+    if (user == null) return [];
+    try {
+      final snapshot = await _credentialsCollection(user.uid).get();
+      return snapshot.docs.map((doc) {
+        final data = doc.data();
+        return VaultCredential(
+          id: data['id'] as String? ?? doc.id,
+          title: data['title'] as String? ?? '',
+          username: data['username'] as String? ?? '',
+          password: data['password'] as String? ?? '',
+          url: data['url'] as String?,
+          notes: data['notes'] as String?,
+          category: data['category'] as String? ?? 'Login',
+          isHidden: data['isHidden'] as bool? ?? false,
+          createdAt: DateTime.tryParse(data['createdAt'] as String? ?? '') ?? DateTime.now(),
+          updatedAt: DateTime.tryParse(data['updatedAt'] as String? ?? '') ?? DateTime.now(),
+        );
+      }).toList();
+    } catch (e) {
+      debugPrint('Firestore listCloudCredentials error: $e');
+      return [];
+    }
+  }
+
+  // --- Unified Bi-directional Sync ---
+
   Future<SyncResult> syncAll({bool downloadMissing = true}) async {
     final user = _auth.currentUser;
-    if (user == null) throw StateError('Sign in to sync your vault.');
+    if (user == null) throw StateError('Sign in with your email to sync.');
 
     var uploaded = 0;
     var downloaded = 0;
 
-    // 1. Upload un-synced local files
+    // 1. Files Sync
     final localFiles = await vault.listFiles();
     for (final file in localFiles) {
       if (file.syncState != 'synced') {
@@ -186,7 +330,6 @@ class FirebaseSyncService {
       }
     }
 
-    // 2. Download missing cloud files from other phones
     final cloudFiles = await listCloudFiles();
     if (downloadMissing) {
       for (final remote in cloudFiles) {
@@ -199,6 +342,34 @@ class FirebaseSyncService {
           } catch (_) {}
         }
       }
+    }
+
+    // 2. Notes Sync
+    try {
+      final localNotes = await vault.listNotes();
+      for (final note in localNotes) {
+        await uploadNote(note);
+      }
+      final remoteNotes = await listCloudNotes();
+      for (final rNote in remoteNotes) {
+        await vault.saveNote(rNote);
+      }
+    } catch (e) {
+      debugPrint('Notes sync error: $e');
+    }
+
+    // 3. Credentials Sync
+    try {
+      final localCreds = await vault.listCredentials();
+      for (final cred in localCreds) {
+        await uploadCredential(cred);
+      }
+      final remoteCreds = await listCloudCredentials();
+      for (final rCred in remoteCreds) {
+        await vault.saveCredential(rCred);
+      }
+    } catch (e) {
+      debugPrint('Credentials sync error: $e');
     }
 
     return SyncResult(

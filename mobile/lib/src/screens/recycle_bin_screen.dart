@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../data/api_client.dart';
+import '../data/firebase_sync_service.dart';
 import '../data/local_vault.dart';
 import '../models/vault_file.dart';
 
@@ -82,12 +82,10 @@ class _RecycleBinScreenState extends State<RecycleBinScreen> {
       type: 'trash',
       isHidden: widget.isHiddenVault,
     );
-    if (!widget.isHiddenVault && await ApiClient(widget.vault).hasSession) {
+    if (!widget.isHiddenVault) {
       try {
-        await ApiClient(widget.vault).syncAll(downloadMissing: false);
-      } catch (_) {
-        /* The local delete is queued for next sync. */
-      }
+        await FirebaseSyncService(widget.vault).deleteCloudFile(file.id);
+      } catch (_) {}
     }
     await _load();
   }

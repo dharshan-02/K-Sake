@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
 import '../data/local_vault.dart';
+import '../data/firebase_sync_service.dart';
 import '../models/vault_note.dart';
 
 class NotesScreen extends StatefulWidget {
@@ -112,6 +113,7 @@ class _NotesScreenState extends State<NotesScreen> {
                         onPressed: () async {
                           Navigator.pop(ctx);
                           await widget.vault.deleteNote(existingNote.id);
+                          FirebaseSyncService(widget.vault).deleteCloudNote(existingNote.id);
                           _loadNotes();
                         },
                       ),
@@ -135,6 +137,7 @@ class _NotesScreenState extends State<NotesScreen> {
                           updatedAt: now,
                         );
                         await widget.vault.saveNote(note);
+                        FirebaseSyncService(widget.vault).uploadNote(note);
                         if (ctx.mounted) Navigator.pop(ctx);
                         _loadNotes();
                       },
