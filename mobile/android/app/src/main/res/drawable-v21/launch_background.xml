@@ -6,6 +6,6 @@
     <item
         android:width="96dp"
         android:height="96dp"
-        android:drawable="@drawable/keepsake_launch_mark"
+        android:drawable="@mipmap/ic_launcher"
         android:gravity="center" />
 </layer-list>
