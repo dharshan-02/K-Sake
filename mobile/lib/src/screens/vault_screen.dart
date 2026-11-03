@@ -11,6 +11,8 @@ import '../data/auth_service.dart';
 import 'file_preview_screen.dart';
 import 'cloud_files_screen.dart';
 import 'recovery_screen.dart';
+import 'recycle_bin_screen.dart';
+import '../widgets/folder_name_dialog.dart';
 import '../models/vault_file.dart';
 
 class VaultScreen extends StatefulWidget {
@@ -31,6 +33,9 @@ class _VaultScreenState extends State<VaultScreen> {
   bool _loading = true;
   String _query = '';
   String? _selectedFolder;
+  String _selectedType = 'all';
+  String _selectedSync = 'all';
+  String _selectedDate = 'all';
   String? _message;
   late final ApiClient _api = ApiClient(widget.vault);
   StreamSubscription<List<ConnectivityResult>>? _connectivity;
@@ -58,7 +63,9 @@ class _VaultScreenState extends State<VaultScreen> {
 
   Future<void> _reload() async {
     final files = await widget.vault.listFiles(isHidden: widget.isHiddenVault);
-    final hasCloudSession = await _api.hasSession;
+    final hasCloudSession = widget.isHiddenVault
+        ? false
+        : await _api.hasSession;
     if (mounted) {
       setState(() {
         _files = files;
@@ -106,7 +113,7 @@ class _VaultScreenState extends State<VaultScreen> {
       );
     }
     // Auto-sync newly imported files with cloud if linked
-    if (imported > 0 && await _api.hasSession) {
+    if (imported > 0 && !widget.isHiddenVault && await _api.hasSession) {
       _sync(silent: true);
     }
   }
@@ -115,9 +122,9 @@ class _VaultScreenState extends State<VaultScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete this file?'),
+        title: const Text('Move to Recycle Bin?'),
         content: Text(
-          '${file.name} will be removed from this device and queued for cloud deletion if it has synced.',
+          '${file.name} will stay in Recycle Bin until you restore it or permanently delete it.',
         ),
         actions: [
           TextButton(
@@ -133,21 +140,29 @@ class _VaultScreenState extends State<VaultScreen> {
     );
     if (confirmed == true) {
       await widget.vault.deleteFile(file);
+      await widget.vault.addNotification(
+        'Moved to Recycle Bin',
+        file.name,
+        type: 'trash',
+        isHidden: widget.isHiddenVault,
+      );
       await _reload();
     }
   }
 
   Future<void> _rename(VaultFile file) async {
-    final controller = TextEditingController(text: file.name);
+    var updatedName = file.name;
     final name = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Rename file'),
-        content: TextField(
-          controller: controller,
+        content: TextFormField(
+          initialValue: file.name,
           autofocus: true,
           maxLength: 255,
           decoration: const InputDecoration(labelText: 'File name'),
+          onChanged: (value) => updatedName = value,
+          onFieldSubmitted: (value) => Navigator.pop(context, value.trim()),
         ),
         actions: [
           TextButton(
@@ -155,52 +170,200 @@ class _VaultScreenState extends State<VaultScreen> {
             child: const Text('Cancel'),
           ),
           FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text.trim()),
+            onPressed: () => Navigator.pop(context, updatedName.trim()),
             child: const Text('Save'),
           ),
         ],
       ),
     );
-    controller.dispose();
     if (name == null || name.isEmpty || name == file.name) return;
     await widget.vault.renameFile(file, name);
     await _reload();
   }
 
   Future<void> _moveToFolder(VaultFile file) async {
-    final controller = TextEditingController(text: file.folderName ?? '');
     final name = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Move to folder'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLength: 80,
-          decoration: const InputDecoration(
-            labelText: 'Folder name',
-            hintText: 'Leave blank for no folder',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text.trim()),
-            child: const Text('Save'),
-          ),
-        ],
+      builder: (_) => FolderNameDialog(
+        title: 'Move to folder',
+        submitLabel: 'Save',
+        fieldLabel: 'Folder name',
+        hintText: 'Leave blank for no folder',
+        initialName: file.folderName ?? '',
       ),
     );
-    controller.dispose();
     if (name == null) return;
     await widget.vault.setFolder(file.id, name.isEmpty ? null : name);
     await _reload();
   }
 
+  Future<void> _createFolder() async {
+    final name = await showDialog<String>(
+      context: context,
+      builder: (_) => const FolderNameDialog(
+        title: 'Create folder',
+        submitLabel: 'Create',
+        fieldLabel: 'Folder name',
+        hintText: 'For example, Receipts',
+      ),
+    );
+    if (!mounted || name == null) return;
+    try {
+      await widget.vault.createFolder(name, isHidden: widget.isHiddenVault);
+      await _reload();
+      if (mounted) {
+        setState(() {
+          _selectedFolder = name;
+          _message = 'Folder created. Move files into it from a file’s menu.';
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        final message = error is FormatException || error is StateError
+            ? error
+                  .toString()
+                  .replaceFirst('FormatException: ', '')
+                  .replaceFirst('Bad state: ', '')
+            : 'Could not create the folder. Please try again.';
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(message)));
+      }
+    }
+  }
+
+  Future<void> _showFilters() async {
+    var type = _selectedType;
+    var sync = _selectedSync;
+    var date = _selectedDate;
+    final result = await showModalBottomSheet<Map<String, String>>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setSheetState) => SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Filter files',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const SizedBox(height: 12),
+                _filterChoices(context, 'File type', type, const {
+                  'all': 'All types',
+                  'image': 'Photos',
+                  'pdf': 'PDFs',
+                  'document': 'Documents',
+                  'other': 'Other',
+                }, (value) => setSheetState(() => type = value)),
+                _filterChoices(context, 'Sync status', sync, const {
+                  'all': 'Any status',
+                  'local': 'On this device',
+                  'queued': 'Queued',
+                  'uploading': 'Uploading',
+                  'synced': 'Synced',
+                  'attention': 'Needs attention',
+                }, (value) => setSheetState(() => sync = value)),
+                _filterChoices(context, 'Date added', date, const {
+                  'all': 'Any time',
+                  '7': 'Past 7 days',
+                  '30': 'Past 30 days',
+                  '365': 'Past year',
+                }, (value) => setSheetState(() => date = value)),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context, const {
+                        'type': 'all',
+                        'sync': 'all',
+                        'date': 'all',
+                      }),
+                      child: const Text('Clear filters'),
+                    ),
+                    const Spacer(),
+                    FilledButton(
+                      onPressed: () => Navigator.pop(context, {
+                        'type': type,
+                        'sync': sync,
+                        'date': date,
+                      }),
+                      child: const Text('Show results'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    if (result != null && mounted) {
+      setState(() {
+        _selectedType = result['type'] ?? 'all';
+        _selectedSync = result['sync'] ?? 'all';
+        _selectedDate = result['date'] ?? 'all';
+      });
+    }
+  }
+
+  Widget _filterChoices(
+    BuildContext context,
+    String title,
+    String selected,
+    Map<String, String> choices,
+    ValueChanged<String> onChanged,
+  ) => Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: Theme.of(context).textTheme.titleSmall),
+        Wrap(
+          spacing: 8,
+          children: choices.entries
+              .map(
+                (entry) => ChoiceChip(
+                  label: Text(entry.value),
+                  selected: selected == entry.key,
+                  onSelected: (_) => onChanged(entry.key),
+                ),
+              )
+              .toList(),
+        ),
+      ],
+    ),
+  );
+
+  String _typeFor(VaultFile file) {
+    final mime = file.mimeType.toLowerCase();
+    final ext = file.name.toLowerCase().split('.').last;
+    if (mime.startsWith('image/') ||
+        {'jpg', 'jpeg', 'png', 'gif', 'webp', 'heic'}.contains(ext)) {
+      return 'image';
+    }
+    if (mime == 'application/pdf' || ext == 'pdf') return 'pdf';
+    if (mime.startsWith('text/') ||
+        {
+          'doc',
+          'docx',
+          'odt',
+          'rtf',
+          'txt',
+          'xls',
+          'xlsx',
+          'ppt',
+          'pptx',
+        }.contains(ext)) {
+      return 'document';
+    }
+    return 'other';
+  }
+
   Future<void> _uploadFile(VaultFile file) async {
+    if (widget.isHiddenVault) return;
     if (!await _api.hasSession) {
       _account();
       return;
@@ -227,6 +390,11 @@ class _VaultScreenState extends State<VaultScreen> {
         },
         isCancelled: () => _cancelledUploads.contains(file.id),
       );
+      await widget.vault.addNotification(
+        'Upload complete',
+        file.name,
+        type: 'upload',
+      );
       await _reload();
       if (mounted) {
         setState(() => _message = '“${file.name}” is synced.');
@@ -238,6 +406,11 @@ class _VaultScreenState extends State<VaultScreen> {
         );
       }
     } catch (e) {
+      await widget.vault.addNotification(
+        'Upload needs attention',
+        file.name,
+        type: 'error',
+      );
       if (mounted) {
         setState(
           () => _message = 'Upload interrupted. The encrypted file stays on this device. Retry when you’re online.',
@@ -304,6 +477,7 @@ class _VaultScreenState extends State<VaultScreen> {
   }
 
   Future<void> _account() async {
+    if (widget.isHiddenVault) return;
     final hasSession = await _api.hasSession;
     final userEmail = await _api.userEmail;
     if (!mounted) return;
@@ -405,6 +579,7 @@ class _VaultScreenState extends State<VaultScreen> {
   }
 
   Future<void> _sync({bool silent = false}) async {
+    if (widget.isHiddenVault) return;
     if (_syncing) return;
     _syncing = true;
     if (!silent && mounted) {
@@ -427,6 +602,20 @@ class _VaultScreenState extends State<VaultScreen> {
         },
         isUploadCancelled: (id) => _cancelledUploads.contains(id),
       );
+      if (summary.uploaded > 0) {
+        await widget.vault.addNotification(
+          'Uploads complete',
+          '${summary.uploaded} file${summary.uploaded == 1 ? '' : 's'} synced to your cloud vault.',
+          type: 'upload',
+        );
+      }
+      if (summary.downloaded > 0) {
+        await widget.vault.addNotification(
+          'Downloads complete',
+          '${summary.downloaded} cloud file${summary.downloaded == 1 ? '' : 's'} are available offline.',
+          type: 'download',
+        );
+      }
       await _reload();
       if (mounted && !silent) {
         final parts = <String>[];
@@ -462,34 +651,64 @@ class _VaultScreenState extends State<VaultScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final folders =
-        _files
-            .map((f) => f.folderName)
-            .whereType<String>()
-            .where((f) => f.isNotEmpty)
-            .toSet()
-            .toList()
-          ..sort();
+    final folders = widget.vault.listFolders(isHidden: widget.isHiddenVault);
+    final cutoff = _selectedDate == 'all'
+        ? null
+        : DateTime.now().subtract(Duration(days: int.parse(_selectedDate)));
     final visible = _files
         .where(
           (f) =>
               f.name.toLowerCase().contains(_query.toLowerCase()) &&
-              (_selectedFolder == null || f.folderName == _selectedFolder),
+              (_selectedFolder == null || f.folderName == _selectedFolder) &&
+              (_selectedType == 'all' || _typeFor(f) == _selectedType) &&
+              (_selectedSync == 'all' ||
+                  switch (_selectedSync) {
+                    'local' =>
+                      f.syncState == 'local' ||
+                          (!_hasCloudSession &&
+                              (f.syncState == 'queued' ||
+                                  f.syncState == 'rename_pending')),
+                    'queued' =>
+                      f.syncState == 'queued' ||
+                          f.syncState == 'rename_pending',
+                    'uploading' => f.syncState == 'uploading',
+                    'synced' => f.syncState == 'synced',
+                    'attention' =>
+                      f.syncState == 'failed' || f.syncState == 'conflict',
+                    _ => true,
+                  }) &&
+              (cutoff == null || !f.createdAt.isBefore(cutoff)),
         )
         .toList();
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.isHiddenVault ? 'Hidden Safe' : 'Files'),
         actions: [
+          if (!widget.isHiddenVault) ...[
+            IconButton(
+              onPressed: () => _sync(silent: false),
+              tooltip: 'Sync Cloud Files',
+              icon: const Icon(Icons.sync),
+            ),
+            IconButton(
+              onPressed: _account,
+              tooltip: 'Cloud account and recovery',
+              icon: const Icon(Icons.account_circle_outlined),
+            ),
+          ],
           IconButton(
-            onPressed: () => _sync(silent: false),
-            tooltip: 'Sync Cloud Files',
-            icon: const Icon(Icons.sync),
-          ),
-          IconButton(
-            onPressed: _account,
-            tooltip: 'Cloud account and recovery',
-            icon: const Icon(Icons.account_circle_outlined),
+            onPressed: () => Navigator.of(context)
+                .push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => RecycleBinScreen(
+                      vault: widget.vault,
+                      isHiddenVault: widget.isHiddenVault,
+                    ),
+                  ),
+                )
+                .then((_) => _reload()),
+            tooltip: 'Recycle Bin',
+            icon: const Icon(Icons.delete_outline),
           ),
           IconButton(
             onPressed: _import,
@@ -522,7 +741,9 @@ class _VaultScreenState extends State<VaultScreen> {
               ),
               const SizedBox(height: 4),
               Text(
-                _hasCloudSession
+                widget.isHiddenVault
+                    ? 'Private local safe · Never uploaded or synced'
+                    : _hasCloudSession
                     ? 'Encrypted on this device · Cloud account signed in'
                     : 'Encrypted on this device · Sync when you connect an account',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -541,6 +762,39 @@ class _VaultScreenState extends State<VaultScreen> {
                   ),
                 ),
                 onChanged: (v) => setState(() => _query = v),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Searches names in this device’s vault.',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ),
+                    TextButton.icon(
+                      onPressed: _showFilters,
+                      icon: Icon(
+                        Icons.tune,
+                        size: 18,
+                        color:
+                            (_selectedType != 'all' ||
+                                _selectedSync != 'all' ||
+                                _selectedDate != 'all')
+                            ? Theme.of(context).colorScheme.primary
+                            : null,
+                      ),
+                      label: Text(
+                        (_selectedType != 'all' ||
+                                _selectedSync != 'all' ||
+                                _selectedDate != 'all')
+                            ? 'Filters on'
+                            : 'Filter',
+                      ),
+                    ),
+                  ],
+                ),
               ),
               if (_message != null)
                 Padding(
@@ -579,6 +833,11 @@ class _VaultScreenState extends State<VaultScreen> {
                     ],
                     onChanged: (value) =>
                         setState(() => _selectedFolder = value),
+                  ),
+                  IconButton(
+                    onPressed: _createFolder,
+                    tooltip: 'Create folder',
+                    icon: const Icon(Icons.create_new_folder_outlined),
                   ),
                   const SizedBox(width: 8),
                   Text(
@@ -620,13 +879,19 @@ class _VaultScreenState extends State<VaultScreen> {
           const Icon(Icons.folder_open_outlined, size: 40),
           const SizedBox(height: 8),
           Text(
-            _query.isEmpty ? 'Nothing here yet' : 'No matching files',
+            _query.isEmpty
+                ? (_selectedFolder == null
+                      ? 'Nothing here yet'
+                      : 'This folder is empty')
+                : 'No matching files',
             style: Theme.of(context).textTheme.titleMedium,
           ),
           const SizedBox(height: 6),
           Text(
             _query.isEmpty
-                ? 'Add a document or photo. It stays encrypted on this device until you sync it.'
+                ? (_selectedFolder == null
+                      ? 'Add a document or photo. It stays encrypted on this device until you sync it.'
+                      : 'Move files here from a file’s menu, or add a file to this folder after importing it.')
                 : 'Try another name.',
           ),
           if (_query.isEmpty) ...[
@@ -715,9 +980,10 @@ class _VaultScreenState extends State<VaultScreen> {
           if (value == 'rename') _rename(file);
           if (value == 'folder') _moveToFolder(file);
           if (value == 'resolve') _resolveConflict(file);
-          if (value == 'toggle_hidden') {
+          if (value == 'toggle_hidden' && !widget.isHiddenVault) {
             await widget.vault.toggleFileHidden(file.id, !file.isHidden);
             await _reload();
+            if (!file.isHidden && _hasCloudSession) _sync(silent: true);
           }
         },
         itemBuilder: (_) => [
@@ -745,18 +1011,22 @@ class _VaultScreenState extends State<VaultScreen> {
             ),
           const PopupMenuItem(value: 'rename', child: Text('Rename')),
           const PopupMenuItem(value: 'folder', child: Text('Move to folder')),
-          PopupMenuItem(
-            value: 'toggle_hidden',
-            child: Text(
-              file.isHidden ? 'Move to normal vault' : 'Move to hidden safe',
+          if (!widget.isHiddenVault)
+            PopupMenuItem(
+              value: 'toggle_hidden',
+              child: Text(
+                file.isHidden ? 'Move to regular files' : 'Move to Hidden Safe',
+              ),
             ),
-          ),
           if (file.syncState == 'conflict')
             const PopupMenuItem(
               value: 'resolve',
               child: Text('Keep local name on cloud'),
             ),
-          const PopupMenuItem(value: 'delete', child: Text('Delete')),
+          const PopupMenuItem(
+            value: 'delete',
+            child: Text('Move to Recycle Bin'),
+          ),
         ],
       ),
     ),

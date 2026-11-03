@@ -1,7 +1,9 @@
 import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:uuid/uuid.dart';
+
 import '../data/local_vault.dart';
 import '../models/vault_credential.dart';
 
@@ -25,7 +27,13 @@ class _PasswordsScreenState extends State<PasswordsScreen> {
   String _query = '';
   String _selectedCategory = 'All';
 
-  static const List<String> _categories = ['All', 'Login', 'Card', 'API Key', 'Recovery'];
+  static const List<String> _categories = [
+    'All',
+    'Login',
+    'Card',
+    'API Key',
+    'Recovery',
+  ];
 
   @override
   void initState() {
@@ -35,7 +43,9 @@ class _PasswordsScreenState extends State<PasswordsScreen> {
 
   Future<void> _loadCredentials() async {
     setState(() => _loading = true);
-    final list = await widget.vault.listCredentials(isHidden: widget.isHiddenVault);
+    final list = await widget.vault.listCredentials(
+      isHidden: widget.isHiddenVault,
+    );
     if (mounted) {
       setState(() {
         _credentials = list;
@@ -88,7 +98,9 @@ class _PasswordsScreenState extends State<PasswordsScreen> {
             height: MediaQuery.of(context).size.height * 0.88,
             decoration: BoxDecoration(
               color: theme.scaffoldBackgroundColor,
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(24),
+              ),
             ),
             padding: EdgeInsets.only(
               top: 16,
@@ -103,13 +115,20 @@ class _PasswordsScreenState extends State<PasswordsScreen> {
                   Row(
                     children: [
                       Text(
-                        existing == null ? 'Add Secure Credential' : 'Edit Credential',
-                        style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                        existing == null
+                            ? 'Add Secure Credential'
+                            : 'Edit Credential',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                       const Spacer(),
                       if (existing != null)
                         IconButton(
-                          icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                          icon: const Icon(
+                            Icons.delete_outline,
+                            color: Colors.redAccent,
+                          ),
                           onPressed: () async {
                             Navigator.pop(ctx);
                             await widget.vault.deleteCredential(existing.id);
@@ -123,7 +142,11 @@ class _PasswordsScreenState extends State<PasswordsScreen> {
                           final pass = passCtrl.text;
                           if (title.isEmpty || pass.isEmpty) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Title and password are required.')),
+                              const SnackBar(
+                                content: Text(
+                                  'Title and password are required.',
+                                ),
+                              ),
                             );
                             return;
                           }
@@ -133,8 +156,12 @@ class _PasswordsScreenState extends State<PasswordsScreen> {
                             title: title,
                             username: user,
                             password: pass,
-                            url: urlCtrl.text.trim().isEmpty ? null : urlCtrl.text.trim(),
-                            notes: notesCtrl.text.trim().isEmpty ? null : notesCtrl.text.trim(),
+                            url: urlCtrl.text.trim().isEmpty
+                                ? null
+                                : urlCtrl.text.trim(),
+                            notes: notesCtrl.text.trim().isEmpty
+                                ? null
+                                : notesCtrl.text.trim(),
                             category: category,
                             isHidden: isHidden,
                             createdAt: existing?.createdAt ?? now,
@@ -160,7 +187,8 @@ class _PasswordsScreenState extends State<PasswordsScreen> {
                           child: ChoiceChip(
                             label: Text(c),
                             selected: category == c,
-                            onSelected: (val) => setModalState(() => category = c),
+                            onSelected: (val) =>
+                                setModalState(() => category = c),
                           ),
                         );
                       }).toList(),
@@ -171,9 +199,12 @@ class _PasswordsScreenState extends State<PasswordsScreen> {
                   TextField(
                     controller: titleCtrl,
                     decoration: const InputDecoration(
-                      labelText: 'Account / Service (e.g. Google, Bank, GitHub)',
+                      labelText:
+                          'Account / Service (e.g. Google, Bank, GitHub)',
                       prefixIcon: Icon(Icons.badge_outlined),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.all(Radius.circular(12)),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -182,7 +213,9 @@ class _PasswordsScreenState extends State<PasswordsScreen> {
                     decoration: const InputDecoration(
                       labelText: 'Username or Email',
                       prefixIcon: Icon(Icons.person_outline),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.all(Radius.circular(12)),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -205,12 +238,19 @@ class _PasswordsScreenState extends State<PasswordsScreen> {
                             },
                           ),
                           IconButton(
-                            icon: Icon(obscurePass ? Icons.visibility_off : Icons.visibility),
-                            onPressed: () => setModalState(() => obscurePass = !obscurePass),
+                            icon: Icon(
+                              obscurePass
+                                  ? Icons.visibility_off
+                                  : Icons.visibility,
+                            ),
+                            onPressed: () =>
+                                setModalState(() => obscurePass = !obscurePass),
                           ),
                         ],
                       ),
-                      border: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
+                      border: const OutlineInputBorder(
+                        borderRadius: BorderRadius.all(Radius.circular(12)),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -219,7 +259,9 @@ class _PasswordsScreenState extends State<PasswordsScreen> {
                     decoration: const InputDecoration(
                       labelText: 'Website URL (Optional)',
                       prefixIcon: Icon(Icons.link_outlined),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.all(Radius.circular(12)),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -229,18 +271,27 @@ class _PasswordsScreenState extends State<PasswordsScreen> {
                     decoration: const InputDecoration(
                       labelText: 'Notes / Security Questions / PIN',
                       prefixIcon: Icon(Icons.note_outlined),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.all(Radius.circular(12)),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 12),
-                  SwitchListTile(
-                    title: const Text('Store in Hidden Vault', style: TextStyle(fontSize: 14)),
-                    subtitle: const Text('Only accessible in decoy / hidden mode', style: TextStyle(fontSize: 12)),
-                    value: isHidden,
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    onChanged: (val) => setModalState(() => isHidden = val),
-                  ),
+                  if (!widget.isHiddenVault)
+                    SwitchListTile(
+                      title: const Text(
+                        'Store in Hidden Safe',
+                        style: TextStyle(fontSize: 14),
+                      ),
+                      subtitle: const Text(
+                        'Only listed inside the Hidden Safe area',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                      value: isHidden,
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      onChanged: (val) => setModalState(() => isHidden = val),
+                    ),
                 ],
               ),
             ),
@@ -263,9 +314,11 @@ class _PasswordsScreenState extends State<PasswordsScreen> {
   @override
   Widget build(BuildContext context) {
     final filtered = _credentials.where((c) {
-      final matchesCat = _selectedCategory == 'All' || c.category == _selectedCategory;
+      final matchesCat =
+          _selectedCategory == 'All' || c.category == _selectedCategory;
       final q = _query.toLowerCase();
-      final matchesQ = c.title.toLowerCase().contains(q) ||
+      final matchesQ =
+          c.title.toLowerCase().contains(q) ||
           c.username.toLowerCase().contains(q) ||
           (c.url?.toLowerCase().contains(q) ?? false);
       return matchesCat && matchesQ;
@@ -306,32 +359,40 @@ class _PasswordsScreenState extends State<PasswordsScreen> {
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : filtered.isEmpty
-                    ? Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.password_rounded, size: 60, color: Theme.of(context).hintColor),
-                            const SizedBox(height: 12),
-                            Text(
-                              _query.isEmpty ? 'No credentials stored' : 'No matching logins',
-                              style: Theme.of(context).textTheme.titleMedium,
-                            ),
-                            const SizedBox(height: 6),
-                            const Text('Save accounts, banking logins, and recovery keys.'),
-                          ],
+                ? Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.password_rounded,
+                          size: 60,
+                          color: Theme.of(context).hintColor,
                         ),
-                      )
-                    : RefreshIndicator(
-                        onRefresh: _loadCredentials,
-                        child: ListView.builder(
-                          padding: const EdgeInsets.fromLTRB(16, 4, 16, 80),
-                          itemCount: filtered.length,
-                          itemBuilder: (context, i) {
-                            final cred = filtered[i];
-                            return _buildCredCard(cred);
-                          },
+                        const SizedBox(height: 12),
+                        Text(
+                          _query.isEmpty
+                              ? 'No credentials stored'
+                              : 'No matching logins',
+                          style: Theme.of(context).textTheme.titleMedium,
                         ),
-                      ),
+                        const SizedBox(height: 6),
+                        const Text(
+                          'Save accounts, banking logins, and recovery keys.',
+                        ),
+                      ],
+                    ),
+                  )
+                : RefreshIndicator(
+                    onRefresh: _loadCredentials,
+                    child: ListView.builder(
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 80),
+                      itemCount: filtered.length,
+                      itemBuilder: (context, i) {
+                        final cred = filtered[i];
+                        return _buildCredCard(cred);
+                      },
+                    ),
+                  ),
           ),
         ],
       ),
@@ -356,13 +417,15 @@ class _PasswordsScreenState extends State<PasswordsScreen> {
             Row(
               children: [
                 CircleAvatar(
-                  backgroundColor: theme.colorScheme.primary.withValues(alpha: 0.15),
+                  backgroundColor: theme.colorScheme.primary.withValues(
+                    alpha: 0.15,
+                  ),
                   child: Icon(
                     cred.category == 'Card'
                         ? Icons.credit_card
                         : cred.category == 'API Key'
-                            ? Icons.code
-                            : Icons.lock_outline,
+                        ? Icons.code
+                        : Icons.lock_outline,
                     color: theme.colorScheme.primary,
                     size: 20,
                   ),
@@ -377,19 +440,29 @@ class _PasswordsScreenState extends State<PasswordsScreen> {
                           Flexible(
                             child: Text(
                               cred.title,
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
                             ),
                           ),
                           if (cred.isHidden) ...[
                             const SizedBox(width: 6),
-                            const Icon(Icons.shield_outlined, size: 15, color: Colors.tealAccent),
+                            const Icon(
+                              Icons.shield_outlined,
+                              size: 15,
+                              color: Colors.tealAccent,
+                            ),
                           ],
                         ],
                       ),
                       if (cred.username.isNotEmpty)
                         Text(
                           cred.username,
-                          style: TextStyle(color: theme.hintColor, fontSize: 13),
+                          style: TextStyle(
+                            color: theme.hintColor,
+                            fontSize: 13,
+                          ),
                         ),
                     ],
                   ),
@@ -424,7 +497,8 @@ class _PasswordsScreenState extends State<PasswordsScreen> {
                     iconSize: 18,
                     icon: const Icon(Icons.person),
                     tooltip: 'Copy Username',
-                    onPressed: () => _copyToClipboard(cred.username, 'Username'),
+                    onPressed: () =>
+                        _copyToClipboard(cred.username, 'Username'),
                   ),
               ],
             ),

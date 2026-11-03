@@ -1,6 +1,6 @@
 import { ConflictException, ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, DeleteObjectsCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { PrismaService } from '../prisma/prisma.module';
 
@@ -84,6 +84,34 @@ export class FilesService {
     catch { throw new ServiceUnavailableException('File storage is unavailable'); }
     await this.prisma.vaultFile.delete({ where: { id } });
     return { id, deleted: true };
+  }
+
+  async deleteAllForOwner(ownerId: string) {
+    const files = await this.prisma.vaultFile.findMany({
+      where: { ownerId },
+      select: { objectKey: true },
+    });
+    for (let index = 0; index < files.length; index += 1000) {
+      const batch = files.slice(index, index + 1000);
+      try {
+        const result = await this.s3.send(
+          new DeleteObjectsCommand({
+            Bucket: this.bucket,
+            Delete: {
+              Objects: batch.map(({ objectKey }) => ({ Key: objectKey })),
+              Quiet: true,
+            },
+          }),
+        );
+        if (result.Errors?.length) {
+          throw new Error('One or more stored objects could not be removed');
+        }
+      } catch {
+        throw new ServiceUnavailableException(
+          'Cloud files could not be fully removed. The account has not been deleted; retry when storage is available.',
+        );
+      }
+    }
   }
 
   private async owned(ownerId: string, id: string) {

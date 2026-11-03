@@ -49,10 +49,15 @@ class _CloudFilesScreenState extends State<CloudFilesScreen> {
     });
     try {
       await widget.api.downloadToVault(file);
+      await widget.vault.addNotification(
+        'File downloaded',
+        file['name'] as String,
+        type: 'download',
+      );
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Downloaded "${file['name']}"')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Downloaded "${file['name']}"')));
         setState(() {});
       }
     } catch (e) {
@@ -71,23 +76,31 @@ class _CloudFilesScreenState extends State<CloudFilesScreen> {
     try {
       for (final file in _files) {
         final id = file['id'] as String;
-        final local = await widget.vault.findFile(id);
+        final local = await widget.vault.findFile(id, includeTrashed: true);
         if (local == null) {
           await widget.api.downloadToVault(file);
+          await widget.vault.addNotification(
+            'File downloaded',
+            file['name'] as String,
+            type: 'download',
+          );
           count++;
           if (mounted) setState(() {});
         }
       }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Downloaded $count file${count == 1 ? '' : 's'} to local vault.')),
+          SnackBar(
+            content: Text(
+              'Downloaded $count file${count == 1 ? '' : 's'} to local vault.',
+            ),
+          ),
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Download incomplete: $e')),
-        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Download incomplete: $e')));
       }
     } finally {
       if (mounted) setState(() => _downloadingAll = false);
@@ -136,7 +149,10 @@ class _CloudFilesScreenState extends State<CloudFilesScreen> {
                   children: [
                     Text(_error!, textAlign: TextAlign.center),
                     const SizedBox(height: 12),
-                    FilledButton(onPressed: _refresh, child: const Text('Retry')),
+                    FilledButton(
+                      onPressed: _refresh,
+                      child: const Text('Retry'),
+                    ),
                   ],
                 ),
               ),
@@ -187,7 +203,9 @@ class _CloudFilesScreenState extends State<CloudFilesScreen> {
                   ? Colors.green.withValues(alpha: 0.15)
                   : Colors.blue.withValues(alpha: 0.15),
               child: Icon(
-                local != null ? Icons.cloud_done_rounded : Icons.cloud_download_outlined,
+                local != null
+                    ? Icons.cloud_done_rounded
+                    : Icons.cloud_download_outlined,
                 color: local != null ? Colors.green : Colors.blue,
               ),
             ),

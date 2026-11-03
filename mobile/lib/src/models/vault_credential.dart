@@ -34,18 +34,16 @@ class VaultCredential {
     bool? isHidden,
     DateTime? createdAt,
     DateTime? updatedAt,
-  }) =>
-      VaultCredential(
-        id: id ?? this.id,
-        title: title ?? this.title,
-        username: username ?? this.username,
-        password: password ?? this.password,
-        url: url ?? this.url,
-        notes: notes ?? this.notes,
-        category: category ?? this.category,
-        isHidden: isHidden ?? this.isHidden,
-        createdAt: createdAt ?? this.createdAt,
-        updatedAt: updatedAt ?? this.updatedAt,
-      );
+  }) => VaultCredential(
+    id: id ?? this.id,
+    title: title ?? this.title,
+    username: username ?? this.username,
+    password: password ?? this.password,
+    url: url ?? this.url,
+    notes: notes ?? this.notes,
+    category: category ?? this.category,
+    isHidden: isHidden ?? this.isHidden,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
 }
-

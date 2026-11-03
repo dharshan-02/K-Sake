@@ -60,6 +60,9 @@ class AuthService {
     await _storage.write(key: _kRegistered, value: 'true');
   }
 
+  Future<void> setAccountMode(String mode) =>
+      _storage.write(key: _kAccountMode, value: mode);
+
   Future<AuthLockType> getPreferredLockType() async {
     final typeStr = await _storage.read(key: _kLockType);
     return AuthLockType.values.firstWhere(

@@ -1,9 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
-import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -19,6 +19,8 @@ class LocalVault {
   static const _keyName = 'vault_db_key_v1';
   final _uuid = const Uuid();
   final _aead = AesGcm.with256bits();
+  final ValueNotifier<int> unreadNotificationCount = ValueNotifier<int>(0);
+  final ValueNotifier<int> notificationRevision = ValueNotifier<int>(0);
   Database? _db;
   late Directory _root;
   late SecretKey _vaultSecret;
@@ -67,6 +69,12 @@ class LocalVault {
       size INTEGER NOT NULL, created_at TEXT NOT NULL, local_path TEXT NOT NULL,
       sync_state TEXT NOT NULL DEFAULT 'local', folder_name TEXT
     )''');
+    db.execute('''CREATE TABLE IF NOT EXISTS folders (
+      name TEXT NOT NULL,
+      is_hidden INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (name, is_hidden)
+    )''');
     final columns = db
         .select('PRAGMA table_info(files)')
         .map((r) => r['name'] as String)
@@ -81,6 +89,9 @@ class LocalVault {
       db.execute(
         'ALTER TABLE files ADD COLUMN is_hidden INTEGER NOT NULL DEFAULT 0',
       );
+    }
+    if (!columns.contains('deleted_at')) {
+      db.execute('ALTER TABLE files ADD COLUMN deleted_at TEXT');
     }
     // If the process stopped mid-transfer, keep the encrypted local copy and
     // make the file retryable instead of leaving it stuck as "uploading".
@@ -112,7 +123,17 @@ class LocalVault {
     db.execute(
       'CREATE TABLE IF NOT EXISTS pending_deletes (id TEXT PRIMARY KEY)',
     );
+    db.execute('''CREATE TABLE IF NOT EXISTS notifications (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      message TEXT NOT NULL,
+      type TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      is_read INTEGER NOT NULL DEFAULT 0,
+      is_hidden INTEGER NOT NULL DEFAULT 0
+    )''');
     _db = db;
+    await refreshUnreadNotificationCount();
   }
 
   Future<void> setMasterKeyFromCredentials(
@@ -145,7 +166,7 @@ class LocalVault {
 
   Future<List<VaultFile>> listFiles({bool isHidden = false}) async {
     final rows = _db!.select(
-      'SELECT * FROM files WHERE is_hidden = ? ORDER BY created_at DESC',
+      'SELECT * FROM files WHERE is_hidden = ? AND deleted_at IS NULL ORDER BY created_at DESC',
       [isHidden ? 1 : 0],
     );
     return rows
@@ -167,6 +188,29 @@ class LocalVault {
         )
         .toList();
   }
+
+  Future<List<VaultFile>> listTrashedFiles({bool isHidden = false}) async {
+    final rows = _db!.select(
+      'SELECT * FROM files WHERE is_hidden = ? AND deleted_at IS NOT NULL ORDER BY deleted_at DESC',
+      [isHidden ? 1 : 0],
+    );
+    return rows.map(_fileFromRow).toList();
+  }
+
+  VaultFile _fileFromRow(Row r) => VaultFile(
+    id: r['id'] as String,
+    name: r['name'] as String,
+    mimeType: r['mime_type'] as String,
+    size: r['size'] as int,
+    createdAt: DateTime.parse(r['created_at'] as String),
+    localPath: r['local_path'] as String,
+    syncState: r['sync_state'] as String,
+    folderName: r['folder_name'] as String?,
+    remoteUpdatedAt: r['remote_updated_at'] == null
+        ? null
+        : DateTime.parse(r['remote_updated_at'] as String),
+    isHidden: (r['is_hidden'] as int? ?? 0) == 1,
+  );
 
   Future<VaultFile> importFile(
     String sourcePath,
@@ -285,34 +329,46 @@ class LocalVault {
 
   List<String> listFolders({bool isHidden = false}) => _db!
       .select(
-        "SELECT DISTINCT folder_name FROM files WHERE is_hidden = ? AND folder_name IS NOT NULL AND folder_name != '' ORDER BY folder_name",
-        [isHidden ? 1 : 0],
+        "SELECT name FROM folders WHERE is_hidden = ? UNION SELECT folder_name AS name FROM files WHERE is_hidden = ? AND folder_name IS NOT NULL AND folder_name != '' ORDER BY name COLLATE NOCASE",
+        [isHidden ? 1 : 0, isHidden ? 1 : 0],
       )
-      .map((r) => r['folder_name'] as String)
+      .map((r) => r['name'] as String)
       .toList();
+
+  Future<void> createFolder(String name, {bool isHidden = false}) async {
+    final clean = name.trim();
+    if (clean.isEmpty ||
+        clean.length > 80 ||
+        clean.contains('/') ||
+        clean.contains('\\')) {
+      throw const FormatException(
+        'Choose a folder name up to 80 characters without slashes.',
+      );
+    }
+    final existing = _db!.select(
+      'SELECT 1 FROM folders WHERE is_hidden = ? AND lower(name) = lower(?) UNION SELECT 1 FROM files WHERE is_hidden = ? AND folder_name IS NOT NULL AND lower(folder_name) = lower(?) LIMIT 1',
+      [isHidden ? 1 : 0, clean, isHidden ? 1 : 0, clean],
+    );
+    if (existing.isNotEmpty) {
+      throw StateError('A folder with that name already exists.');
+    }
+    _db!.execute(
+      'INSERT INTO folders (name, is_hidden, created_at) VALUES (?, ?, ?)',
+      [clean, isHidden ? 1 : 0, DateTime.now().toUtc().toIso8601String()],
+    );
+  }
 
   Future<void> setFolder(String id, String? folder) async {
     _db!.execute('UPDATE files SET folder_name = ? WHERE id = ?', [folder, id]);
   }
 
-  Future<VaultFile?> findFile(String id) async {
-    final rows = _db!.select('SELECT * FROM files WHERE id = ?', [id]);
-    if (rows.isEmpty) return null;
-    final r = rows.first;
-    return VaultFile(
-      id: r['id'] as String,
-      name: r['name'] as String,
-      mimeType: r['mime_type'] as String,
-      size: r['size'] as int,
-      createdAt: DateTime.parse(r['created_at'] as String),
-      localPath: r['local_path'] as String,
-      syncState: r['sync_state'] as String,
-      folderName: r['folder_name'] as String?,
-      remoteUpdatedAt: r['remote_updated_at'] == null
-          ? null
-          : DateTime.parse(r['remote_updated_at'] as String),
-      isHidden: (r['is_hidden'] as int? ?? 0) == 1,
+  Future<VaultFile?> findFile(String id, {bool includeTrashed = false}) async {
+    final rows = _db!.select(
+      'SELECT * FROM files WHERE id = ?${includeTrashed ? '' : ' AND deleted_at IS NULL'}',
+      [id],
     );
+    if (rows.isEmpty) return null;
+    return _fileFromRow(rows.first);
   }
 
   Future<void> addDownloadedCiphertext({
@@ -326,10 +382,10 @@ class LocalVault {
   }) async {
     final destination = File(p.join(_root.path, 'vault_files', '$id.enc'));
     await File(sourcePath).copy(destination.path);
-    final existing = await findFile(id);
+    final existing = await findFile(id, includeTrashed: true);
     if (existing != null) {
       _db!.execute(
-        'UPDATE files SET name = ?, mime_type = ?, size = ?, local_path = ?, sync_state = ?, remote_updated_at = ? WHERE id = ?',
+        'UPDATE files SET name = ?, mime_type = ?, size = ?, local_path = ?, sync_state = ?, remote_updated_at = ?, deleted_at = NULL WHERE id = ?',
         [
           name,
           mimeType,
@@ -468,10 +524,27 @@ class LocalVault {
   }
 
   Future<void> toggleFileHidden(String id, bool isHidden) async {
-    _db!.execute('UPDATE files SET is_hidden = ? WHERE id = ?', [
-      isHidden ? 1 : 0,
-      id,
-    ]);
+    if (isHidden) {
+      final rows = _db!.select(
+        'SELECT remote_updated_at FROM files WHERE id = ?',
+        [id],
+      );
+      if (rows.isNotEmpty && rows.first['remote_updated_at'] != null) {
+        _db!.execute('INSERT OR IGNORE INTO pending_deletes (id) VALUES (?)', [
+          id,
+        ]);
+      }
+      _db!.execute(
+        'UPDATE files SET is_hidden = 1, sync_state = ?, remote_updated_at = NULL WHERE id = ?',
+        ['local', id],
+      );
+      return;
+    }
+    _db!.execute('UPDATE files SET is_hidden = ? WHERE id = ?', [0, id]);
+    _db!.execute(
+      'UPDATE files SET sync_state = ?, remote_updated_at = NULL WHERE id = ?',
+      ['queued', id],
+    );
   }
 
   Future<void> clearPreviewCache() async {
@@ -486,7 +559,7 @@ class LocalVault {
 
   Future<Map<String, dynamic>> getVaultStats({bool isHidden = false}) async {
     final fileRows = _db!.select(
-      'SELECT COUNT(*) as count, COALESCE(SUM(size), 0) as total_size FROM files WHERE is_hidden = ?',
+      'SELECT COUNT(*) as count, COALESCE(SUM(size), 0) as total_size FROM files WHERE is_hidden = ? AND deleted_at IS NULL',
       [isHidden ? 1 : 0],
     );
     final noteRows = _db!.select(
@@ -616,7 +689,8 @@ class LocalVault {
     if (keyBytes.length != 32) {
       throw const FormatException('Recovery code is invalid.');
     }
-    if ((await listFiles()).isNotEmpty) {
+    if ((await listFiles()).isNotEmpty ||
+        (await listTrashedFiles()).isNotEmpty) {
       throw StateError(
         'This device already has local files. Export them before replacing its vault key.',
       );
@@ -637,6 +711,17 @@ class LocalVault {
   }
 
   Future<void> deleteFile(VaultFile file) async {
+    _db!.execute(
+      'UPDATE files SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL',
+      [DateTime.now().toUtc().toIso8601String(), file.id],
+    );
+  }
+
+  Future<void> restoreFile(String id) async {
+    _db!.execute('UPDATE files SET deleted_at = NULL WHERE id = ?', [id]);
+  }
+
+  Future<void> permanentlyDeleteFile(VaultFile file) async {
     final path = p.normalize(file.localPath);
     final filesRoot =
         '${p.normalize(p.join(_root.path, 'vault_files'))}${p.separator}';
@@ -644,12 +729,71 @@ class LocalVault {
       final local = File(path);
       if (await local.exists()) await local.delete();
     }
-    if (file.remoteUpdatedAt != null) {
+    if (file.remoteUpdatedAt != null || file.syncState == 'synced') {
       _db!.execute('INSERT OR IGNORE INTO pending_deletes (id) VALUES (?)', [
         file.id,
       ]);
     }
     _db!.execute('DELETE FROM files WHERE id = ?', [file.id]);
+  }
+
+  Future<void> addNotification(
+    String title,
+    String message, {
+    String type = 'activity',
+    bool isHidden = false,
+  }) async {
+    final id = _uuid.v4();
+    _db!.execute(
+      'INSERT INTO notifications (id,title,message,type,created_at,is_read,is_hidden) VALUES (?,?,?,?,?,0,?)',
+      [
+        id,
+        title,
+        message,
+        type,
+        DateTime.now().toUtc().toIso8601String(),
+        isHidden ? 1 : 0,
+      ],
+    );
+    _db!.execute(
+      'DELETE FROM notifications WHERE is_hidden = ? AND id NOT IN (SELECT id FROM notifications WHERE is_hidden = ? ORDER BY created_at DESC LIMIT 100)',
+      [isHidden ? 1 : 0, isHidden ? 1 : 0],
+    );
+    await refreshUnreadNotificationCount(isHidden: isHidden);
+    notificationRevision.value++;
+  }
+
+  Future<List<Map<String, Object?>>> listNotifications({
+    bool isHidden = false,
+  }) async => _db!.select(
+    'SELECT * FROM notifications WHERE is_hidden = ? ORDER BY created_at DESC LIMIT 100',
+    [isHidden ? 1 : 0],
+  );
+
+  Future<void> markNotificationRead(String id, {bool isHidden = false}) async {
+    _db!.execute(
+      'UPDATE notifications SET is_read = 1 WHERE id = ? AND is_hidden = ?',
+      [id, isHidden ? 1 : 0],
+    );
+    await refreshUnreadNotificationCount(isHidden: isHidden);
+    notificationRevision.value++;
+  }
+
+  Future<void> markAllNotificationsRead({bool isHidden = false}) async {
+    _db!.execute('UPDATE notifications SET is_read = 1 WHERE is_hidden = ?', [
+      isHidden ? 1 : 0,
+    ]);
+    await refreshUnreadNotificationCount(isHidden: isHidden);
+    notificationRevision.value++;
+  }
+
+  Future<void> refreshUnreadNotificationCount({bool isHidden = false}) async {
+    if (_db == null) return;
+    final result = _db!.select(
+      'SELECT COUNT(*) AS count FROM notifications WHERE is_hidden = ? AND is_read = 0',
+      [isHidden ? 1 : 0],
+    );
+    unreadNotificationCount.value = result.first['count'] as int;
   }
 
   SecretKey _vaultKey() {

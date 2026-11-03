@@ -73,8 +73,11 @@ class _PatternLockViewState extends State<PatternLockView> {
 
   @override
   Widget build(BuildContext context) {
-    final activeColor = widget.selectedColor ?? Theme.of(context).colorScheme.primary;
-    final inactiveColor = widget.dotColor ?? Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.3);
+    final activeColor =
+        widget.selectedColor ?? Theme.of(context).colorScheme.primary;
+    final inactiveColor =
+        widget.dotColor ??
+        Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.3);
 
     return SizedBox(
       width: widget.dimension,

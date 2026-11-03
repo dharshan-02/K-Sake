@@ -28,16 +28,14 @@ class VaultNote {
     bool? isHidden,
     DateTime? createdAt,
     DateTime? updatedAt,
-  }) =>
-      VaultNote(
-        id: id ?? this.id,
-        title: title ?? this.title,
-        content: content ?? this.content,
-        colorValue: colorValue ?? this.colorValue,
-        isPinned: isPinned ?? this.isPinned,
-        isHidden: isHidden ?? this.isHidden,
-        createdAt: createdAt ?? this.createdAt,
-        updatedAt: updatedAt ?? this.updatedAt,
-      );
+  }) => VaultNote(
+    id: id ?? this.id,
+    title: title ?? this.title,
+    content: content ?? this.content,
+    colorValue: colorValue ?? this.colorValue,
+    isPinned: isPinned ?? this.isPinned,
+    isHidden: isHidden ?? this.isHidden,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
 }
-

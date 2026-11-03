@@ -5,10 +5,12 @@ class MoreScreen extends StatelessWidget {
     super.key,
     required this.onNotes,
     required this.onPasswords,
+    required this.onRecycleBin,
   });
 
   final VoidCallback onNotes;
   final VoidCallback onPasswords;
+  final VoidCallback onRecycleBin;
 
   @override
   Widget build(BuildContext context) {
@@ -43,6 +45,18 @@ class MoreScreen extends StatelessWidget {
             subtitle: const Text('Keep account details in your vault'),
             trailing: const Icon(Icons.chevron_right),
             onTap: onPasswords,
+          ),
+        ),
+        Card(
+          child: ListTile(
+            contentPadding: const EdgeInsets.all(16),
+            leading: const CircleAvatar(child: Icon(Icons.delete_outline)),
+            title: const Text('Recycle Bin'),
+            subtitle: const Text(
+              'Restore deleted files or permanently remove them',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: onRecycleBin,
           ),
         ),
       ],

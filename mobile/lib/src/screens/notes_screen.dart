@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
+
 import '../data/local_vault.dart';
 import '../models/vault_note.dart';
 
@@ -49,9 +50,14 @@ class _NotesScreenState extends State<NotesScreen> {
   }
 
   Future<void> _openNoteEditor([VaultNote? existingNote]) async {
-    final titleController = TextEditingController(text: existingNote?.title ?? '');
-    final contentController = TextEditingController(text: existingNote?.content ?? '');
-    var selectedColor = existingNote?.colorValue ?? _noteColors.first.toARGB32();
+    final titleController = TextEditingController(
+      text: existingNote?.title ?? '',
+    );
+    final contentController = TextEditingController(
+      text: existingNote?.content ?? '',
+    );
+    var selectedColor =
+        existingNote?.colorValue ?? _noteColors.first.toARGB32();
     var isPinned = existingNote?.isPinned ?? false;
     var isHidden = existingNote?.isHidden ?? widget.isHiddenVault;
 
@@ -66,7 +72,9 @@ class _NotesScreenState extends State<NotesScreen> {
             height: MediaQuery.of(context).size.height * 0.85,
             decoration: BoxDecoration(
               color: theme.scaffoldBackgroundColor,
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(24),
+              ),
             ),
             padding: EdgeInsets.only(
               top: 16,
@@ -81,18 +89,26 @@ class _NotesScreenState extends State<NotesScreen> {
                   children: [
                     Text(
                       existingNote == null ? 'New Encrypted Note' : 'Edit Note',
-                      style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     const Spacer(),
                     IconButton(
-                      icon: Icon(isPinned ? Icons.push_pin : Icons.push_pin_outlined),
+                      icon: Icon(
+                        isPinned ? Icons.push_pin : Icons.push_pin_outlined,
+                      ),
                       color: isPinned ? Colors.amber : null,
                       tooltip: 'Pin Note',
-                      onPressed: () => setModalState(() => isPinned = !isPinned),
+                      onPressed: () =>
+                          setModalState(() => isPinned = !isPinned),
                     ),
                     if (existingNote != null)
                       IconButton(
-                        icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                        icon: const Icon(
+                          Icons.delete_outline,
+                          color: Colors.redAccent,
+                        ),
                         onPressed: () async {
                           Navigator.pop(ctx);
                           await widget.vault.deleteNote(existingNote.id);
@@ -135,7 +151,8 @@ class _NotesScreenState extends State<NotesScreen> {
                     const SizedBox(width: 8),
                     for (final c in _noteColors)
                       GestureDetector(
-                        onTap: () => setModalState(() => selectedColor = c.toARGB32()),
+                        onTap: () =>
+                            setModalState(() => selectedColor = c.toARGB32()),
                         child: Container(
                           margin: const EdgeInsets.symmetric(horizontal: 4),
                           width: 24,
@@ -144,26 +161,35 @@ class _NotesScreenState extends State<NotesScreen> {
                             color: c,
                             shape: BoxShape.circle,
                             border: Border.all(
-                              color: selectedColor == c.toARGB32() ? Colors.white : Colors.transparent,
+                              color: selectedColor == c.toARGB32()
+                                  ? Colors.white
+                                  : Colors.transparent,
                               width: 2,
                             ),
                           ),
                         ),
                       ),
                     const Spacer(),
-                    FilterChip(
-                      selected: isHidden,
-                      label: const Text('Hidden Safe', style: TextStyle(fontSize: 11)),
-                      avatar: const Icon(Icons.shield_outlined, size: 14),
-                      onSelected: (val) => setModalState(() => isHidden = val),
-                    ),
+                    if (!widget.isHiddenVault)
+                      FilterChip(
+                        selected: isHidden,
+                        label: const Text(
+                          'Hidden Safe',
+                          style: TextStyle(fontSize: 11),
+                        ),
+                        avatar: const Icon(Icons.shield_outlined, size: 14),
+                        onSelected: (val) =>
+                            setModalState(() => isHidden = val),
+                      ),
                   ],
                 ),
                 const Divider(height: 20),
 
                 TextField(
                   controller: titleController,
-                  style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
                   decoration: const InputDecoration(
                     hintText: 'Note Title…',
                     border: InputBorder.none,
@@ -194,7 +220,8 @@ class _NotesScreenState extends State<NotesScreen> {
   Widget build(BuildContext context) {
     final filtered = _notes.where((n) {
       final q = _query.toLowerCase();
-      return n.title.toLowerCase().contains(q) || n.content.toLowerCase().contains(q);
+      return n.title.toLowerCase().contains(q) ||
+          n.content.toLowerCase().contains(q);
     }).toList();
 
     return Scaffold(
@@ -216,32 +243,38 @@ class _NotesScreenState extends State<NotesScreen> {
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : filtered.isEmpty
-                    ? Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.note_alt_outlined, size: 60, color: Theme.of(context).hintColor),
-                            const SizedBox(height: 12),
-                            Text(
-                              _query.isEmpty ? 'No notes yet' : 'No matching notes',
-                              style: Theme.of(context).textTheme.titleMedium,
-                            ),
-                            const SizedBox(height: 6),
-                            const Text('Write private thoughts and confidential memos.'),
-                          ],
+                ? Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.note_alt_outlined,
+                          size: 60,
+                          color: Theme.of(context).hintColor,
                         ),
-                      )
-                    : RefreshIndicator(
-                        onRefresh: _loadNotes,
-                        child: ListView.builder(
-                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 80),
-                          itemCount: filtered.length,
-                          itemBuilder: (context, i) {
-                            final note = filtered[i];
-                            return _buildNoteCard(note);
-                          },
+                        const SizedBox(height: 12),
+                        Text(
+                          _query.isEmpty ? 'No notes yet' : 'No matching notes',
+                          style: Theme.of(context).textTheme.titleMedium,
                         ),
-                      ),
+                        const SizedBox(height: 6),
+                        const Text(
+                          'Write private thoughts and confidential memos.',
+                        ),
+                      ],
+                    ),
+                  )
+                : RefreshIndicator(
+                    onRefresh: _loadNotes,
+                    child: ListView.builder(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 80),
+                      itemCount: filtered.length,
+                      itemBuilder: (context, i) {
+                        final note = filtered[i];
+                        return _buildNoteCard(note);
+                      },
+                    ),
+                  ),
           ),
         ],
       ),
@@ -262,7 +295,9 @@ class _NotesScreenState extends State<NotesScreen> {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
         side: BorderSide(
-          color: note.isPinned ? Colors.amber.withValues(alpha: 0.5) : Colors.transparent,
+          color: note.isPinned
+              ? Colors.amber.withValues(alpha: 0.5)
+              : Colors.transparent,
           width: 1.5,
         ),
       ),
@@ -290,7 +325,11 @@ class _NotesScreenState extends State<NotesScreen> {
                     const Icon(Icons.push_pin, size: 16, color: Colors.amber),
                   if (note.isHidden) ...[
                     const SizedBox(width: 6),
-                    const Icon(Icons.shield_outlined, size: 16, color: Colors.tealAccent),
+                    const Icon(
+                      Icons.shield_outlined,
+                      size: 16,
+                      color: Colors.tealAccent,
+                    ),
                   ],
                 ],
               ),
@@ -311,11 +350,17 @@ class _NotesScreenState extends State<NotesScreen> {
                 children: [
                   Text(
                     '${note.updatedAt.day}/${note.updatedAt.month}/${note.updatedAt.year}',
-                    style: TextStyle(color: Colors.white.withValues(alpha: 0.4), fontSize: 11),
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.4),
+                      fontSize: 11,
+                    ),
                   ),
                   Text(
                     '${note.content.length} chars',
-                    style: TextStyle(color: Colors.white.withValues(alpha: 0.4), fontSize: 11),
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.4),
+                      fontSize: 11,
+                    ),
                   ),
                 ],
               ),

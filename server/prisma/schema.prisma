@@ -14,6 +14,21 @@ model User {
   createdAt    DateTime   @default(now())
   files        VaultFile[]
   recovery     RecoveryEnvelope?
+  devices      DeviceSession[]
+}
+
+model DeviceSession {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @db.Uuid
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deviceId   String   @db.VarChar(80)
+  deviceName String   @db.VarChar(120)
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+  revokedAt  DateTime?
+
+  @@unique([userId, deviceId])
+  @@index([userId, revokedAt])
 }
 
 model RecoveryEnvelope {

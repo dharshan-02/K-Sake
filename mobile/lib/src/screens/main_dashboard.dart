@@ -7,6 +7,9 @@ import 'notes_screen.dart';
 import 'passwords_screen.dart';
 import 'more_screen.dart';
 import 'settings_screen.dart';
+import 'notifications_screen.dart';
+import 'recycle_bin_screen.dart';
+import '../widgets/keepsake_logo.dart';
 
 class MainDashboard extends StatefulWidget {
   const MainDashboard({
@@ -32,13 +35,11 @@ class _MainDashboardState extends State<MainDashboard> {
   void initState() {
     super.initState();
     _hiddenMode = widget.isHiddenVault;
+    widget.vault.refreshUnreadNotificationCount(isHidden: widget.isHiddenVault);
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-
     final pages = [
       VaultScreen(vault: widget.vault, isHiddenVault: _hiddenMode),
       GalleryScreen(vault: widget.vault, isHiddenVault: _hiddenMode),
@@ -57,20 +58,31 @@ class _MainDashboardState extends State<MainDashboard> {
             ),
           ),
         ),
+        onRecycleBin: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => RecycleBinScreen(
+              vault: widget.vault,
+              isHiddenVault: _hiddenMode,
+            ),
+          ),
+        ),
       ),
-      SettingsScreen(vault: widget.vault, onLockNow: widget.onLock),
+      SettingsScreen(
+        vault: widget.vault,
+        onLockNow: widget.onLock,
+        isHiddenVault: _hiddenMode,
+      ),
     ];
 
     return Scaffold(
       appBar: AppBar(
         title: Row(
           children: [
-            Icon(
-              _hiddenMode ? Icons.shield_moon : Icons.shield_rounded,
-              color: _hiddenMode ? Colors.amber : colorScheme.primary,
-              size: 24,
-            ),
-            const SizedBox(width: 8),
+            if (!_hiddenMode) const KeepsakeLogo(size: 32),
+            if (_hiddenMode) ...[
+              const Icon(Icons.shield_moon, color: Colors.amber, size: 24),
+              const SizedBox(width: 8),
+            ],
             Text(
               _hiddenMode ? 'Hidden Safe' : 'Keepsake',
               style: TextStyle(
@@ -79,36 +91,29 @@ class _MainDashboardState extends State<MainDashboard> {
                 color: _hiddenMode ? Colors.amber : null,
               ),
             ),
-            if (_hiddenMode) ...[
-              const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.amber.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: Colors.amber.withValues(alpha: 0.4),
-                  ),
-                ),
-                child: const Text(
-                  'DECOY',
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.amber,
-                  ),
-                ),
-              ),
-            ],
           ],
         ),
         actions: [
-          if (_hiddenMode)
-            TextButton.icon(
-              icon: const Icon(Icons.swap_horiz, size: 18),
-              label: const Text('Normal'),
-              onPressed: () => setState(() => _hiddenMode = false),
+          ValueListenableBuilder<int>(
+            valueListenable: widget.vault.unreadNotificationCount,
+            builder: (context, count, _) => IconButton(
+              tooltip:
+                  'Activity notifications${count > 0 ? ', $count unread' : ''}',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => NotificationsScreen(
+                    vault: widget.vault,
+                    isHiddenVault: _hiddenMode,
+                  ),
+                ),
+              ),
+              icon: Badge(
+                isLabelVisible: count > 0,
+                label: Text(count > 99 ? '99+' : '$count'),
+                child: const Icon(Icons.notifications_outlined),
+              ),
             ),
+          ),
           IconButton(
             icon: const Icon(Icons.lock_outline),
             tooltip: 'Lock Vault',

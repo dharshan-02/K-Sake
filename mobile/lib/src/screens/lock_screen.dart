@@ -3,6 +3,7 @@ import 'package:local_auth/local_auth.dart';
 
 import '../data/local_vault.dart';
 import '../data/auth_service.dart';
+import '../widgets/keepsake_logo.dart';
 import '../widgets/pattern_lock_view.dart';
 
 class LockScreen extends StatefulWidget {
@@ -28,6 +29,9 @@ class _LockScreenState extends State<LockScreen> {
   DateTime? _lastTapTime;
   bool _busy = false;
   bool _unlockCelebration = false;
+  bool _hiddenEntryMode = false;
+  int _hiddenPinLength = 4;
+  int _regularPinLength = 4;
   String? _error;
 
   @override
@@ -44,8 +48,18 @@ class _LockScreenState extends State<LockScreen> {
 
   Future<void> _loadPreferredLock() async {
     final type = await _authService.getPreferredLockType();
+    final hiddenPin = await _authService.getHiddenVaultPin();
+    final regularPin = await _authService.getPin();
     if (!mounted) return;
-    setState(() => _currentType = type);
+    setState(() {
+      _currentType = type;
+      _hiddenPinLength = hiddenPin.length < 4
+          ? 4
+          : hiddenPin.length.clamp(4, 6);
+      _regularPinLength = regularPin == null
+          ? 4
+          : regularPin.length.clamp(4, 6);
+    });
     if (type == AuthLockType.biometric) {
       WidgetsBinding.instance.addPostFrameCallback(
         (_) => _authenticateBiometric(),
@@ -95,16 +109,16 @@ class _LockScreenState extends State<LockScreen> {
   }
 
   void _onPinKey(String char) {
-    if (_enteredPin.length >= 6) return;
+    final maxLength = _pinEntryLength;
+    if (_enteredPin.length >= maxLength) return;
     setState(() {
       _enteredPin += char;
       _error = null;
     });
-
-    if (_enteredPin.length >= 4) {
-      _checkPin(_enteredPin);
-    }
   }
+
+  int get _pinEntryLength =>
+      _hiddenEntryMode ? _hiddenPinLength : _regularPinLength;
 
   void _onPinBackspace() {
     if (_enteredPin.isNotEmpty) {
@@ -119,7 +133,20 @@ class _LockScreenState extends State<LockScreen> {
     final hiddenPin = await _authService.getHiddenVaultPin();
     final isHiddenEnabled = await _authService.isHiddenVaultEnabled();
 
-    // Check hidden vault first (Decoy PIN)
+    if (_hiddenEntryMode) {
+      if (isHiddenEnabled && hiddenPin.isNotEmpty && pin == hiddenPin) {
+        await widget.vault.initialize();
+        if (mounted) widget.onUnlock(true);
+      } else if (pin.length >= 4 && mounted) {
+        setState(() {
+          _error = 'That Hidden Safe PIN is not correct.';
+          _enteredPin = '';
+        });
+      }
+      return;
+    }
+
+    // The Hidden Safe PIN also acts as an alternate PIN unlock when enabled.
     if (isHiddenEnabled && pin == hiddenPin) {
       await widget.vault.initialize();
       widget.onUnlock(true); // Open Hidden Vault!
@@ -170,7 +197,7 @@ class _LockScreenState extends State<LockScreen> {
     }
   }
 
-  void _onLogoTap() {
+  Future<void> _onLogoTap() async {
     final now = DateTime.now();
     if (_lastTapTime == null || now.difference(_lastTapTime!).inSeconds > 2) {
       _secretTapCount = 1;
@@ -181,11 +208,26 @@ class _LockScreenState extends State<LockScreen> {
 
     if (_secretTapCount >= 3) {
       _secretTapCount = 0;
+      final enabled = await _authService.isHiddenVaultEnabled();
+      if (!mounted) return;
+      final hiddenPin = await _authService.getHiddenVaultPin();
+      if (!mounted) return;
+      if (!enabled || hiddenPin.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Set up a Hidden Safe PIN in Settings first.'),
+          ),
+        );
+        return;
+      }
+      setState(() {
+        _hiddenEntryMode = true;
+        _enteredPin = '';
+        _error = null;
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-            '🕵️ Decoy / Hidden Safe mode activated. Enter decoy PIN or passcode.',
-          ),
+          content: Text('Enter your Hidden Safe PIN.'),
           duration: Duration(seconds: 2),
         ),
       );
@@ -216,32 +258,11 @@ class _LockScreenState extends State<LockScreen> {
                       // Secret Tap Logo
                       GestureDetector(
                         onTap: _onLogoTap,
-                        child: Center(
-                          child: Container(
-                            padding: const EdgeInsets.all(18),
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: colorScheme.primary.withValues(
-                                alpha: 0.12,
-                              ),
-                              border: Border.all(
-                                color: colorScheme.primary.withValues(
-                                  alpha: 0.3,
-                                ),
-                                width: 2,
-                              ),
-                            ),
-                            child: Icon(
-                              Icons.lock_rounded,
-                              size: 44,
-                              color: colorScheme.primary,
-                            ),
-                          ),
-                        ),
+                        child: Center(child: const KeepsakeLogo(size: 80)),
                       ),
                       const SizedBox(height: 16),
                       Text(
-                        'Vault Locked',
+                        _hiddenEntryMode ? 'Hidden Safe' : 'Vault Locked',
                         textAlign: TextAlign.center,
                         style: theme.textTheme.headlineSmall?.copyWith(
                           fontWeight: FontWeight.bold,
@@ -249,7 +270,9 @@ class _LockScreenState extends State<LockScreen> {
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'Authenticate to access your encrypted records',
+                        _hiddenEntryMode
+                            ? 'Enter your separate Hidden Safe PIN'
+                            : 'Authenticate to access your encrypted records',
                         textAlign: TextAlign.center,
                         style: theme.textTheme.bodyMedium?.copyWith(
                           color: theme.hintColor,
@@ -282,7 +305,18 @@ class _LockScreenState extends State<LockScreen> {
                       ],
 
                       // Unlock Body depending on mode
-                      _buildLockBody(theme),
+                      if (_hiddenEntryMode) ...[
+                        _buildPinKeypad(theme),
+                        TextButton(
+                          onPressed: () => setState(() {
+                            _hiddenEntryMode = false;
+                            _enteredPin = '';
+                            _error = null;
+                          }),
+                          child: const Text('Back to regular unlock'),
+                        ),
+                      ] else
+                        _buildLockBody(theme),
                     ],
                   ),
                 ),
@@ -359,12 +393,13 @@ class _LockScreenState extends State<LockScreen> {
   }
 
   Widget _buildPinKeypad(ThemeData theme) {
+    final pinLength = _pinEntryLength;
     return Column(
       children: [
         // Dots indicator
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
-          children: List.generate(4, (index) {
+          children: List.generate(pinLength, (index) {
             final filled = index < _enteredPin.length;
             return Container(
               margin: const EdgeInsets.symmetric(horizontal: 10),
@@ -399,14 +434,21 @@ class _LockScreenState extends State<LockScreen> {
           children: [
             IconButton(
               iconSize: 28,
-              icon: const Icon(Icons.clear),
-              onPressed: () => setState(() => _enteredPin = ''),
-            ),
-            _buildKeyButton('0'),
-            IconButton(
-              iconSize: 28,
+              tooltip: 'Delete last digit',
               icon: const Icon(Icons.backspace_outlined),
               onPressed: _onPinBackspace,
+            ),
+            _buildKeyButton('0'),
+            SizedBox(
+              width: 88,
+              height: 48,
+              child: FilledButton.icon(
+                onPressed: _enteredPin.length == pinLength
+                    ? () => _checkPin(_enteredPin)
+                    : null,
+                icon: const Icon(Icons.check_rounded, size: 18),
+                label: const Text('Enter'),
+              ),
             ),
           ],
         ),

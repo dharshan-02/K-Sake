@@ -7,13 +7,14 @@ import { AuthModule } from './auth/auth.module';
 import { FilesModule } from './files/files.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { RecoveryModule } from './recovery/recovery.module';
+import { AccountModule } from './account/account.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, envFilePath: '.env' }),
     JwtModule.registerAsync({ global: true, inject: [ConfigService], useFactory: (c: ConfigService) => ({ secret: c.getOrThrow('JWT_SECRET'), signOptions: { expiresIn: '15m', issuer: 'keepsake-api', audience: 'keepsake-client' } }) }),
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 60 }]),
-    PrismaModule, AuthModule, FilesModule, RecoveryModule,
+    PrismaModule, AuthModule, FilesModule, RecoveryModule, AccountModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

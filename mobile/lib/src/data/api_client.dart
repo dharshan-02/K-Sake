@@ -1,13 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'dart:math';
+import 'dart:io';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:uuid/uuid.dart';
 
 import '../models/vault_file.dart';
 import 'local_vault.dart';
@@ -39,6 +40,7 @@ class ApiClient {
   static const _ownerKey = 'vault_account_owner_v1';
   static const _userEmailKey = 'logged_in_user_email_v1';
   static const _serverUrlKey = 'custom_server_url_v1';
+  static const _deviceIdKey = 'keepsake_device_id_v1';
   static const _defaultBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
     defaultValue: 'http://10.0.2.2:3000/v1',
@@ -74,22 +76,37 @@ class ApiClient {
     required bool createAccount,
   }) async {
     final uri = await _uri('auth/${createAccount ? 'register' : 'login'}');
+    var deviceId = await _storage.read(key: _deviceIdKey);
+    if (deviceId == null) {
+      deviceId = const Uuid().v4();
+      await _storage.write(key: _deviceIdKey, value: deviceId);
+    }
     late final http.Response response;
     try {
       response = await _client
           .post(
             uri,
             headers: {'content-type': 'application/json'},
-            body: jsonEncode({'email': email, 'password': password}),
+            body: jsonEncode({
+              'email': email,
+              'password': password,
+              'deviceId': deviceId,
+              'deviceName':
+                  '${Platform.isAndroid
+                      ? 'Android phone'
+                      : Platform.isIOS
+                      ? 'iPhone or iPad'
+                      : 'Keepsake device'} · ${deviceId.substring(0, 4).toUpperCase()}',
+            }),
           )
           .timeout(const Duration(seconds: 8));
     } on TimeoutException {
       throw ApiConnectionException(
-        'The Keepsake server took too long to respond. Check that the API is running and your server address is correct. Your files stored on this device are still available.',
+        'The Keepsake API did not respond. Start the API and database, then check the server address. On a physical phone, 10.0.2.2 will not work; use your computer’s Wi-Fi IP. Your local files are still available.',
       );
     } on SocketException {
       throw ApiConnectionException(
-        'Keepsake could not connect to the server. Check your connection and server address, or use the demo/local vault while offline.',
+        'Keepsake could not connect to the API. Check that the API and database are running and the server address is correct. On a physical phone, use your computer’s Wi-Fi IP instead of 10.0.2.2.',
       );
     } on http.ClientException {
       throw ApiConnectionException(
@@ -133,10 +150,129 @@ class ApiClient {
   Future<String?> get userEmail async =>
       await _storage.read(key: _userEmailKey);
 
+  Future<List<Map<String, dynamic>>> getDevices() async {
+    final token = await _storage.read(key: 'account_access_token');
+    if (token == null) throw StateError('Sign in to manage your devices.');
+    final response = await _client
+        .get(
+          await _uri('auth/devices'),
+          headers: {'authorization': 'Bearer $token'},
+        )
+        .timeout(const Duration(seconds: 10));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw ApiConnectionException(
+        response.statusCode == 401
+            ? 'Your cloud session expired. Sign in again to manage devices.'
+            : 'Could not load your signed-in devices. Check your connection and try again.',
+      );
+    }
+    final decoded = jsonDecode(response.body);
+    if (decoded is! List) {
+      throw const FormatException(
+        'The server returned an invalid device list.',
+      );
+    }
+    return decoded.cast<Map<String, dynamic>>();
+  }
+
+  Future<String?> get currentSessionId async {
+    final token = await _storage.read(key: 'account_access_token');
+    if (token == null) return null;
+    final parts = token.split('.');
+    if (parts.length != 3) return null;
+    try {
+      final claims = jsonDecode(
+        utf8.decode(base64Url.decode(base64Url.normalize(parts[1]))),
+      );
+      return claims is Map<String, dynamic> ? claims['sid'] as String? : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> revokeDevice(String sessionId) async {
+    final token = await _storage.read(key: 'account_access_token');
+    if (token == null) throw StateError('Sign in to manage your devices.');
+    final response = await _client
+        .delete(
+          await _uri('auth/devices/${Uri.encodeComponent(sessionId)}'),
+          headers: {'authorization': 'Bearer $token'},
+        )
+        .timeout(const Duration(seconds: 10));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw ApiConnectionException(
+        response.statusCode == 401
+            ? 'Your cloud session expired. Sign in again to manage devices.'
+            : 'Could not revoke that device. Refresh the list and try again.',
+      );
+    }
+  }
+
   Future<void> signOut() async {
+    final token = await _storage.read(key: 'account_access_token');
+    if (token != null) {
+      try {
+        await _client
+            .post(
+              await _uri('auth/logout'),
+              headers: {'authorization': 'Bearer $token'},
+            )
+            .timeout(const Duration(seconds: 5));
+      } catch (_) {
+        // Always clear this device's credentials, even when offline. The
+        // short-lived server token expires on its own if revocation cannot run.
+      }
+    }
+    await clearLocalSession();
+  }
+
+  Future<void> clearLocalSession() async {
     await _storage.delete(key: 'account_access_token');
     await _storage.delete(key: _ownerKey);
     await _storage.delete(key: _userEmailKey);
+  }
+
+  Future<void> deleteAccount(String password) async {
+    final token = await _storage.read(key: 'account_access_token');
+    if (token == null) {
+      throw StateError('Sign in before deleting your account.');
+    }
+    late final http.Response response;
+    try {
+      response = await _client
+          .delete(
+            await _uri('auth/account'),
+            headers: {
+              'authorization': 'Bearer $token',
+              'content-type': 'application/json',
+            },
+            body: jsonEncode({'password': password}),
+          )
+          .timeout(const Duration(seconds: 60));
+    } on TimeoutException {
+      throw ApiConnectionException(
+        'The delete request timed out. Check your connection and sign in to confirm whether the account still exists before retrying.',
+      );
+    } on SocketException {
+      throw ApiConnectionException(
+        'Keepsake could not reach the server. Your account was not confirmed deleted.',
+      );
+    } on http.ClientException {
+      throw ApiConnectionException(
+        'Keepsake could not reach the server. Your account was not confirmed deleted.',
+      );
+    }
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      String message = 'The account could not be deleted. Try again.';
+      try {
+        final body = jsonDecode(response.body);
+        if (body is Map && body['message'] != null) {
+          message = body['message'].toString();
+        }
+      } catch (_) {}
+      throw Exception(message);
+    }
+    await clearLocalSession();
   }
 
   Future<String> createRecoveryCode() async {
@@ -394,10 +530,14 @@ class ApiClient {
     try {
       cloudFiles = await listCloudFiles();
       if (downloadMissing) {
+        final queuedDeletes = vault.pendingDeletes().toSet();
         for (final item in cloudFiles) {
           final id = item['id'] as String;
+          if (queuedDeletes.contains(id)) continue;
           final localFile = await vault.findFile(id);
           if (localFile == null) {
+            final trashedFile = await vault.findFile(id, includeTrashed: true);
+            if (trashedFile != null) continue;
             try {
               await downloadToVault(item);
               downloadedCount++;

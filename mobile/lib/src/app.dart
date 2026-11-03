@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
+
+import 'dart:async';
+
 import 'data/local_vault.dart';
 import 'data/auth_service.dart';
 import 'models/theme_settings.dart';
 import 'screens/auth_screen.dart';
 import 'screens/lock_screen.dart';
 import 'screens/main_dashboard.dart';
+import 'widgets/keepsake_logo.dart';
 
 class KeepsakeApp extends StatelessWidget {
   const KeepsakeApp({super.key, required this.vault});
@@ -26,12 +30,7 @@ class KeepsakeApp extends StatelessWidget {
   }
 }
 
-enum _FlowState {
-  loading,
-  auth,
-  locked,
-  unlocked,
-}
+enum _FlowState { loading, auth, locked, unlocked }
 
 class AppRootFlow extends StatefulWidget {
   const AppRootFlow({super.key, required this.vault});
@@ -41,15 +40,73 @@ class AppRootFlow extends StatefulWidget {
   State<AppRootFlow> createState() => _AppRootFlowState();
 }
 
-class _AppRootFlowState extends State<AppRootFlow> {
+class _AppRootFlowState extends State<AppRootFlow> with WidgetsBindingObserver {
   final _authService = AuthService();
   _FlowState _state = _FlowState.loading;
   bool _isHiddenVault = false;
+  DateTime? _backgroundedAt;
+  Timer? _autoLockTimer;
+  bool _isInBackground = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _checkInitialState();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _autoLockTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      _isInBackground = true;
+      _scheduleAutoLock();
+    } else if (state == AppLifecycleState.resumed) {
+      _isInBackground = false;
+      _autoLockTimer?.cancel();
+      _autoLockTimer = null;
+      final elapsed = _backgroundedAt == null
+          ? Duration.zero
+          : DateTime.now().difference(_backgroundedAt!);
+      _backgroundedAt = null;
+      _lockIfExpired(elapsed);
+    }
+  }
+
+  Future<void> _scheduleAutoLock() async {
+    if (_state != _FlowState.unlocked || _backgroundedAt != null) return;
+    _backgroundedAt = DateTime.now();
+    final timeoutMinutes = await _authService.getAutoLockMinutes();
+    if (!mounted || !_isInBackground || _state != _FlowState.unlocked) return;
+    if (timeoutMinutes == 0) {
+      setState(() => _state = _FlowState.locked);
+      return;
+    }
+    _autoLockTimer?.cancel();
+    _autoLockTimer = Timer(Duration(minutes: timeoutMinutes), () {
+      if (mounted && _state == _FlowState.unlocked) {
+        setState(() => _state = _FlowState.locked);
+      }
+    });
+  }
+
+  void _lockIfExpired(Duration elapsed) {
+    if (_state != _FlowState.unlocked) return;
+    _authService.getAutoLockMinutes().then((timeout) {
+      if (mounted &&
+          _state == _FlowState.unlocked &&
+          (timeout == 0 || elapsed >= Duration(minutes: timeout))) {
+        setState(() => _state = _FlowState.locked);
+      }
+    });
   }
 
   Future<void> _checkInitialState() async {
@@ -65,9 +122,7 @@ class _AppRootFlowState extends State<AppRootFlow> {
   Widget build(BuildContext context) {
     switch (_state) {
       case _FlowState.loading:
-        return const Scaffold(
-          body: Center(child: CircularProgressIndicator()),
-        );
+        return const _LaunchScreen();
 
       case _FlowState.auth:
         return AuthScreen(
@@ -102,5 +157,61 @@ class _AppRootFlowState extends State<AppRootFlow> {
           },
         );
     }
+  }
+}
+
+class _LaunchScreen extends StatefulWidget {
+  const _LaunchScreen();
+
+  @override
+  State<_LaunchScreen> createState() => _LaunchScreenState();
+}
+
+class _LaunchScreenState extends State<_LaunchScreen>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1100),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Scaffold(
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ScaleTransition(
+              scale: Tween<double>(begin: 0.94, end: 1).animate(
+                CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
+              ),
+              child: const KeepsakeLogo(size: 84),
+            ),
+            const SizedBox(height: 22),
+            Text(
+              'Keepsake',
+              style: Theme.of(context).textTheme.headlineSmall
+                  ?.copyWith(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 24),
+            SizedBox(
+              width: 34,
+              height: 34,
+              child: CircularProgressIndicator(
+                strokeWidth: 3,
+                color: colors.primary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

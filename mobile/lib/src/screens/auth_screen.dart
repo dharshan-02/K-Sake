@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import '../data/api_client.dart';
 import '../data/auth_service.dart';
 import '../data/local_vault.dart';
+import '../widgets/keepsake_logo.dart';
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({
@@ -205,7 +206,7 @@ class _AuthScreenState extends State<AuthScreen>
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const Text(
-              'For the Android emulator, use 10.0.2.2. A physical phone needs your computer’s local network address.',
+              'Cloud sign-in needs the Keepsake API and database to be running. 10.0.2.2 only works in the Android emulator. On a physical phone, enter your computer’s Wi-Fi address, for example http://192.168.1.20:3000/v1. Keep both devices on the same Wi-Fi and use HTTPS for a public server.',
             ),
             const SizedBox(height: 16),
             TextField(
@@ -285,30 +286,8 @@ class _AuthScreenState extends State<AuthScreen>
                     children: [
                       Row(
                         children: [
-                          Container(
-                            width: 46,
-                            height: 46,
-                            decoration: BoxDecoration(
-                              color: colors.primary,
-                              borderRadius: BorderRadius.circular(15),
-                            ),
-                            child: Icon(
-                              Icons.shield_moon_rounded,
-                              color: colors.onPrimary,
-                              size: 25,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              'keepsake',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.titleLarge?.copyWith(
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: -0.5,
-                              ),
-                            ),
+                          const Expanded(
+                            child: KeepsakeLogo(size: 46, showWordmark: true),
                           ),
                           IconButton(
                             tooltip: 'Server address',
