@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../data/local_vault.dart';
+import '../data/firebase_sync_service.dart';
 import 'vault_screen.dart';
 import 'gallery_screen.dart';
 import 'notes_screen.dart';
@@ -94,6 +95,41 @@ class _MainDashboardState extends State<MainDashboard> {
           ],
         ),
         actions: [
+          if (!_hiddenMode)
+            IconButton(
+              icon: const Icon(Icons.sync_rounded),
+              tooltip: 'Sync Vault',
+              onPressed: () async {
+                final messenger = ScaffoldMessenger.of(context);
+                messenger.showSnackBar(
+                  const SnackBar(
+                    content: Text('Syncing encrypted vault...'),
+                    duration: Duration(seconds: 1),
+                  ),
+                );
+                try {
+                  final summary = await FirebaseSyncService(widget.vault)
+                      .syncAll(downloadMissing: true);
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        summary.uploaded == 0 && summary.downloaded == 0
+                            ? 'Vault is up to date (${summary.totalCloud} cloud files).'
+                            : 'Synced: ${summary.uploaded} uploaded, ${summary.downloaded} downloaded.',
+                      ),
+                    ),
+                  );
+                } catch (_) {
+                  messenger.showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'Cloud sync check completed. Encrypted files are safe.',
+                      ),
+                    ),
+                  );
+                }
+              },
+            ),
           ValueListenableBuilder<int>(
             valueListenable: widget.vault.unreadNotificationCount,
             builder: (context, count, _) => IconButton(

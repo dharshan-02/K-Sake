@@ -45,7 +45,7 @@ class _AuthScreenState extends State<AuthScreen>
   final _confirmPassword = TextEditingController();
 
   bool _showPassword = false;
-  bool _deviceOnly = false;
+  final bool _deviceOnly = false;
   bool _busy = false;
   String? _error;
 
@@ -447,50 +447,29 @@ class _AuthScreenState extends State<AuthScreen>
           const SizedBox(height: 22),
           if (_error != null) ...[
             Container(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               decoration: BoxDecoration(
-                color: colors.errorContainer,
+                color: colors.errorContainer.withValues(alpha: 0.7),
                 borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: colors.error.withValues(alpha: 0.3)),
               ),
               child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Icon(
-                    Icons.info_outline,
-                    color: colors.onErrorContainer,
+                    Icons.error_outline_rounded,
+                    color: colors.error,
                     size: 20,
                   ),
-                  const SizedBox(width: 9),
+                  const SizedBox(width: 10),
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          _error!,
-                          style: TextStyle(
-                            color: colors.onErrorContainer,
-                            height: 1.35,
-                          ),
-                        ),
-                        if (_error!.contains('server') ||
-                            _error!.contains('address') ||
-                            _error!.contains('network')) ...[
-                          const SizedBox(height: 8),
-                          OutlinedButton.icon(
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: colors.onErrorContainer,
-                              side: BorderSide(
-                                color: colors.onErrorContainer.withValues(alpha: 0.5),
-                              ),
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                              visualDensity: VisualDensity.compact,
-                            ),
-                            onPressed: _configureServerUrl,
-                            icon: const Icon(Icons.tune_rounded, size: 16),
-                            label: const Text('Change Server Address', style: TextStyle(fontSize: 12)),
-                          ),
-                        ],
-                      ],
+                    child: Text(
+                      _error!,
+                      style: TextStyle(
+                        color: colors.onErrorContainer,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        height: 1.3,
+                      ),
                     ),
                   ),
                 ],
@@ -527,16 +506,10 @@ class _AuthScreenState extends State<AuthScreen>
       ),
       const SizedBox(height: 14),
       _passwordInput(_signInPassword, label: 'Password'),
-      const SizedBox(height: 9),
-      _deviceOnlySwitch(
-        theme,
-        copy: 'Use saved local account',
-        subtitle: 'Do not contact the cloud server for sign-in',
-      ),
-      const SizedBox(height: 14),
+      const SizedBox(height: 20),
       _submitButton(
         label: 'Sign in to vault',
-        icon: Icons.arrow_forward_rounded,
+        icon: Icons.lock_open_rounded,
         onPressed: _handleSignIn,
       ),
     ],
@@ -554,42 +527,32 @@ class _AuthScreenState extends State<AuthScreen>
         textInputAction: TextInputAction.next,
       ),
       const SizedBox(height: 14),
-      _passwordInput(_registerPassword, label: 'Create password'),
+      _passwordInput(_registerPassword, label: 'Create master password'),
       const SizedBox(height: 14),
       _passwordInput(_confirmPassword, label: 'Confirm password'),
-      const SizedBox(height: 9),
-      _accountTypeChoice(theme),
       const SizedBox(height: 12),
-      Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: theme.colorScheme.primaryContainer.withValues(alpha: 0.48),
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(
-              Icons.fingerprint_rounded,
-              color: theme.colorScheme.primary,
-              size: 20,
+      Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.shield_outlined,
+            size: 15,
+            color: theme.colorScheme.primary,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            'Zero-knowledge AES-256 encrypted',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+              fontWeight: FontWeight.w500,
             ),
-            const SizedBox(width: 9),
-            Expanded(
-              child: Text(
-                _deviceOnly
-                    ? 'Device-only vault: your sign-in stays on this device and no cloud account is created. You can choose an unlock method later in Settings.'
-                    : 'Cloud account: files stay on this device first and upload encrypted when you sync. You can choose an unlock method later in Settings.',
-                style: theme.textTheme.bodySmall?.copyWith(height: 1.35),
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
-      const SizedBox(height: 15),
+      const SizedBox(height: 16),
       _submitButton(
-        label: 'Create private vault',
-        icon: Icons.shield_outlined,
+        label: 'Create secure vault',
+        icon: Icons.lock_rounded,
         onPressed: _handleRegister,
       ),
     ],
@@ -647,62 +610,6 @@ class _AuthScreenState extends State<AuthScreen>
         ),
       ),
     ),
-  );
-
-  Widget _deviceOnlySwitch(
-    ThemeData theme, {
-    required String copy,
-    required String subtitle,
-  }) => Material(
-    color: Colors.transparent,
-    child: SwitchListTile.adaptive(
-      contentPadding: EdgeInsets.zero,
-      dense: true,
-      title: Text(
-        copy,
-        style: theme.textTheme.bodyMedium?.copyWith(
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-      subtitle: Text(subtitle, style: theme.textTheme.bodySmall),
-      value: _deviceOnly,
-      onChanged: _busy ? null : (value) => setState(() => _deviceOnly = value),
-    ),
-  );
-
-  Widget _accountTypeChoice(ThemeData theme) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      Text(
-        'Where should your vault live?',
-        style: theme.textTheme.titleSmall?.copyWith(
-          fontWeight: FontWeight.w700,
-        ),
-      ),
-      const SizedBox(height: 8),
-      Wrap(
-        spacing: 8,
-        runSpacing: 4,
-        children: [
-          ChoiceChip(
-            avatar: const Icon(Icons.cloud_outlined, size: 18),
-            label: const Text('Cloud account'),
-            selected: !_deviceOnly,
-            onSelected: _busy
-                ? null
-                : (_) => setState(() => _deviceOnly = false),
-          ),
-          ChoiceChip(
-            avatar: const Icon(Icons.phone_android_rounded, size: 18),
-            label: const Text('Device only'),
-            selected: _deviceOnly,
-            onSelected: _busy
-                ? null
-                : (_) => setState(() => _deviceOnly = true),
-          ),
-        ],
-      ),
-    ],
   );
 
   Widget _submitButton({

@@ -854,16 +854,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                   ),
                   const Divider(height: 1),
-                  ListTile(
-                    leading: const Icon(Icons.dns_outlined),
-                    title: const Text('Backend Server URL'),
-                    subtitle: Text(
-                      _serverUrl,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                  Theme(
+                    data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                    child: ExpansionTile(
+                      leading: const Icon(Icons.settings_ethernet_rounded),
+                      title: const Text('Advanced Server Config', style: TextStyle(fontSize: 14)),
+                      subtitle: const Text('Custom API URL for self-hosted instances', style: TextStyle(fontSize: 12)),
+                      children: [
+                        ListTile(
+                          title: const Text('Custom Server URL'),
+                          subtitle: Text(_serverUrl),
+                          trailing: const Icon(Icons.edit_outlined),
+                          onTap: _showChangeServerUrlDialog,
+                        ),
+                      ],
                     ),
-                    trailing: const Icon(Icons.edit_outlined),
-                    onTap: _showChangeServerUrlDialog,
                   ),
                   if (_hasSession) ...[
                     const Divider(height: 1),

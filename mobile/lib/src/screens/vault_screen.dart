@@ -12,7 +12,6 @@ import '../data/firebase_sync_service.dart';
 import 'file_preview_screen.dart';
 import 'cloud_files_screen.dart';
 import 'recovery_screen.dart';
-import 'recycle_bin_screen.dart';
 import '../widgets/folder_name_dialog.dart';
 import '../models/vault_file.dart';
 
@@ -724,188 +723,228 @@ class _VaultScreenState extends State<VaultScreen> {
         )
         .toList();
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.isHiddenVault ? 'Hidden Safe' : 'Files'),
-        actions: [
-          if (!widget.isHiddenVault) ...[
-            IconButton(
-              onPressed: () => _sync(silent: false),
-              tooltip: 'Sync Cloud Files',
-              icon: const Icon(Icons.sync),
-            ),
-            IconButton(
-              onPressed: _account,
-              tooltip: 'Cloud account and recovery',
-              icon: const Icon(Icons.account_circle_outlined),
-            ),
-          ],
-          IconButton(
-            onPressed: () => Navigator.of(context)
-                .push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => RecycleBinScreen(
-                      vault: widget.vault,
-                      isHiddenVault: widget.isHiddenVault,
-                    ),
-                  ),
-                )
-                .then((_) => _reload()),
-            tooltip: 'Recycle Bin',
-            icon: const Icon(Icons.delete_outline),
-          ),
-          IconButton(
-            onPressed: _import,
-            tooltip: 'Add files',
-            icon: const Icon(Icons.add),
-          ),
-        ],
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _import,
+        icon: const Icon(Icons.add_rounded),
+        label: const Text('Add files', style: TextStyle(fontWeight: FontWeight.w600)),
+        elevation: 2,
       ),
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      widget.isHiddenVault ? 'Hidden Safe' : 'Your files',
-                      style: Theme.of(context).textTheme.titleLarge
-                          ?.copyWith(fontWeight: FontWeight.w700),
-                    ),
-                  ),
-                  FilledButton.tonalIcon(
-                    onPressed: _import,
-                    icon: const Icon(Icons.add_rounded),
-                    label: const Text('Add files'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 4),
-              Text(
-                widget.isHiddenVault
-                    ? 'Private local safe · Never uploaded or synced'
-                    : _hasCloudSession
-                    ? 'Encrypted on this device · Cloud account signed in'
-                    : 'Encrypted on this device · Sync when you connect an account',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 10),
-              TextField(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Top Search Bar
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: TextField(
                 decoration: InputDecoration(
-                  prefixIcon: const Icon(Icons.search),
-                  hintText: 'Search files',
+                  prefixIcon: const Icon(Icons.search_rounded, size: 22),
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      Icons.tune_rounded,
+                      size: 20,
+                      color: (_selectedType != 'all' ||
+                              _selectedSync != 'all' ||
+                              _selectedDate != 'all')
+                          ? Theme.of(context).colorScheme.primary
+                          : Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                    tooltip: 'Filter files',
+                    onPressed: _showFilters,
+                  ),
+                  hintText: 'Search encrypted vault...',
+                  hintStyle: TextStyle(
+                    fontSize: 14,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                   filled: true,
                   border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(24),
                     borderSide: BorderSide.none,
                   ),
                 ),
                 onChanged: (v) => setState(() => _query = v),
               ),
-              Padding(
-                padding: const EdgeInsets.only(top: 2),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        'Searches names in this device’s vault.',
-                        style: Theme.of(context).textTheme.bodySmall,
+            ),
+
+            // Quick Category Filters
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              child: Row(
+                children: [
+                  _filterChip('all', 'All Files'),
+                  const SizedBox(width: 8),
+                  _filterChip('image', 'Photos'),
+                  const SizedBox(width: 8),
+                  _filterChip('pdf', 'PDFs'),
+                  const SizedBox(width: 8),
+                  _filterChip('document', 'Docs'),
+                  const SizedBox(width: 12),
+                  // Folder selector pill
+                  PopupMenuButton<String?>(
+                    tooltip: 'Select folder',
+                    initialValue: _selectedFolder,
+                    onSelected: (val) {
+                      if (val == '__new__') {
+                        _createFolder();
+                      } else {
+                        setState(() => _selectedFolder = val);
+                      }
+                    },
+                    itemBuilder: (_) => [
+                      const PopupMenuItem<String?>(
+                        value: null,
+                        child: Text('All folders'),
+                      ),
+                      ...folders.map(
+                        (f) => PopupMenuItem<String?>(
+                          value: f,
+                          child: Text(f),
+                        ),
+                      ),
+                      const PopupMenuDivider(),
+                      const PopupMenuItem<String?>(
+                        value: '__new__',
+                        child: Row(
+                          children: [
+                            Icon(Icons.add_rounded, size: 18),
+                            SizedBox(width: 8),
+                            Text('New folder'),
+                          ],
+                        ),
+                      ),
+                    ],
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: _selectedFolder != null
+                            ? Theme.of(context).colorScheme.primaryContainer
+                            : Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.folder_outlined,
+                            size: 16,
+                            color: _selectedFolder != null
+                                ? Theme.of(context).colorScheme.primary
+                                : Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            _selectedFolder ?? 'Folders',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: _selectedFolder != null
+                                  ? Theme.of(context).colorScheme.onPrimaryContainer
+                                  : Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Icon(
+                            Icons.arrow_drop_down_rounded,
+                            size: 18,
+                            color: _selectedFolder != null
+                                ? Theme.of(context).colorScheme.primary
+                                : Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                        ],
                       ),
                     ),
-                    TextButton.icon(
-                      onPressed: _showFilters,
-                      icon: Icon(
-                        Icons.tune,
-                        size: 18,
-                        color:
-                            (_selectedType != 'all' ||
-                                _selectedSync != 'all' ||
-                                _selectedDate != 'all')
-                            ? Theme.of(context).colorScheme.primary
-                            : null,
+                  ),
+                ],
+              ),
+            ),
+
+            if (_message != null)
+              Container(
+                margin: const EdgeInsets.fromLTRB(16, 6, 16, 4),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.5),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.info_outline_rounded,
+                      size: 16,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _message!,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onPrimaryContainer,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
-                      label: Text(
-                        (_selectedType != 'all' ||
-                                _selectedSync != 'all' ||
-                                _selectedDate != 'all')
-                            ? 'Filters on'
-                            : 'Filter',
+                    ),
+                    GestureDetector(
+                      onTap: () => setState(() => _message = null),
+                      child: Icon(
+                        Icons.close_rounded,
+                        size: 16,
+                        color: Theme.of(context).colorScheme.onPrimaryContainer,
                       ),
                     ),
                   ],
                 ),
               ),
-              if (_message != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 10),
-                  child: Text(
-                    _message!,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.primary,
-                      fontWeight: FontWeight.w600,
+
+            const SizedBox(height: 6),
+
+            // Files List or Empty State
+            Expanded(
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : visible.isEmpty
+                  ? _empty(context)
+                  : RefreshIndicator(
+                      onRefresh: () => _sync(silent: false),
+                      child: ListView.builder(
+                        padding: const EdgeInsets.only(bottom: 88, top: 4),
+                        itemCount: visible.length,
+                        itemBuilder: (context, index) =>
+                            _fileCard(context, visible[index]),
+                      ),
                     ),
-                  ),
-                ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Text(
-                    'Files',
-                    style: Theme.of(context).textTheme.titleLarge
-                        ?.copyWith(fontWeight: FontWeight.w600),
-                  ),
-                  const Spacer(),
-                  DropdownButton<String?>(
-                    value: _selectedFolder,
-                    underline: const SizedBox.shrink(),
-                    items: [
-                      const DropdownMenuItem<String?>(
-                        value: null,
-                        child: Text('All folders'),
-                      ),
-                      ...folders.map(
-                        (f) => DropdownMenuItem<String?>(
-                          value: f,
-                          child: Text(f, overflow: TextOverflow.ellipsis),
-                        ),
-                      ),
-                    ],
-                    onChanged: (value) =>
-                        setState(() => _selectedFolder = value),
-                  ),
-                  IconButton(
-                    onPressed: _createFolder,
-                    tooltip: 'Create folder',
-                    icon: const Icon(Icons.create_new_folder_outlined),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    '${visible.length}',
-                    semanticsLabel: '${visible.length} files',
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Expanded(
-                child: _loading
-                    ? const Center(child: CircularProgressIndicator())
-                    : visible.isEmpty
-                    ? _empty(context)
-                    : RefreshIndicator(
-                        onRefresh: () => _sync(silent: false),
-                        child: ListView.separated(
-                          itemCount: visible.length,
-                          separatorBuilder: (_, _) => const SizedBox(height: 8),
-                          itemBuilder: (context, index) =>
-                              _fileCard(context, visible[index]),
-                        ),
-                      ),
-              ),
-            ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _filterChip(String type, String label) {
+    final selected = _selectedType == type;
+    final theme = Theme.of(context);
+    return GestureDetector(
+      onTap: () => setState(() => _selectedType = type),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        decoration: BoxDecoration(
+          color: selected
+              ? theme.colorScheme.primary
+              : theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+            color: selected
+                ? theme.colorScheme.onPrimary
+                : theme.colorScheme.onSurfaceVariant,
           ),
         ),
       ),
@@ -914,166 +953,201 @@ class _VaultScreenState extends State<VaultScreen> {
 
   Widget _empty(BuildContext context) => Center(
     child: SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(vertical: 12),
+      padding: const EdgeInsets.all(32),
       child: Column(
         mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          const Icon(Icons.folder_open_outlined, size: 40),
+          Container(
+            width: 72,
+            height: 72,
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.4),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              Icons.shield_outlined,
+              size: 36,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            _query.isEmpty
+                ? (_selectedFolder == null ? 'Your vault is empty' : 'Folder is empty')
+                : 'No files match "$_query"',
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
           const SizedBox(height: 8),
           Text(
             _query.isEmpty
-                ? (_selectedFolder == null
-                      ? 'Nothing here yet'
-                      : 'This folder is empty')
-                : 'No matching files',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          const SizedBox(height: 6),
-          Text(
-            _query.isEmpty
-                ? (_selectedFolder == null
-                      ? 'Add a document or photo. It stays encrypted on this device until you sync it.'
-                      : 'Move files here from a file’s menu, or add a file to this folder after importing it.')
-                : 'Try another name.',
+                ? 'Import photos or files to store them with zero-knowledge AES-256 encryption.'
+                : 'Check your spelling or reset the active filters.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 13,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              height: 1.4,
+            ),
           ),
           if (_query.isEmpty) ...[
-            const SizedBox(height: 12),
-            FilledButton.tonalIcon(
+            const SizedBox(height: 20),
+            FilledButton.icon(
               onPressed: _import,
-              icon: const Icon(Icons.add),
-              label: const Text('Add a file or photo'),
+              icon: const Icon(Icons.add_rounded),
+              label: const Text('Add files'),
             ),
-            if (_hasCloudSession) ...[
-              const SizedBox(height: 4),
-              TextButton.icon(
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) =>
-                        CloudFilesScreen(vault: widget.vault, api: _api),
-                  ),
-                ),
-                icon: const Icon(Icons.cloud_download_outlined),
-                label: const Text('Browse synced files'),
-              ),
-            ],
           ],
         ],
       ),
     ),
   );
 
-  Widget _fileCard(BuildContext context, VaultFile file) => Card(
-    child: ListTile(
-      isThreeLine: file.syncState == 'uploading',
-      onTap: () => Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => FilePreviewScreen(vault: widget.vault, file: file),
+  Widget _fileCard(BuildContext context, VaultFile file) {
+    final theme = Theme.of(context);
+    final nameLower = file.name.toLowerCase();
+    final isImage = file.mimeType.startsWith('image/') ||
+        nameLower.endsWith('.jpg') ||
+        nameLower.endsWith('.jpeg') ||
+        nameLower.endsWith('.png') ||
+        nameLower.endsWith('.webp');
+    final isPdf = file.mimeType == 'application/pdf' || nameLower.endsWith('.pdf');
+    final isDoc = file.mimeType.contains('document') ||
+        nameLower.endsWith('.doc') ||
+        nameLower.endsWith('.docx') ||
+        nameLower.endsWith('.txt');
+
+    final (iconData, iconColor, bgColor) = isImage
+        ? (Icons.image_rounded, const Color(0xFFF59E0B), const Color(0xFFFEF3C7))
+        : isPdf
+            ? (Icons.picture_as_pdf_rounded, const Color(0xFFEF4444), const Color(0xFFFEE2E2))
+            : isDoc
+                ? (Icons.description_rounded, const Color(0xFF3B82F6), const Color(0xFFDBEAFE))
+                : (Icons.insert_drive_file_rounded, const Color(0xFF6B7280), const Color(0xFFF3F4F6));
+
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      decoration: BoxDecoration(
+        color: theme.cardTheme.color ?? theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.35),
+          width: 1,
         ),
       ),
-      leading: CircleAvatar(
-        backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
-        child: Icon(
-          file.mimeType.startsWith('image/') ||
-                  file.name.toLowerCase().endsWith('.jpg') ||
-                  file.name.toLowerCase().endsWith('.jpeg') ||
-                  file.name.toLowerCase().endsWith('.png')
-              ? Icons.image_outlined
-              : Icons.description_outlined,
-        ),
-      ),
-      title: Text(file.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '${_size(file.size)} · ${file.folderName ?? 'No folder'}',
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => FilePreviewScreen(vault: widget.vault, file: file),
           ),
-          const SizedBox(height: 6),
-          Wrap(
-            spacing: 8,
-            runSpacing: 4,
-            crossAxisAlignment: WrapCrossAlignment.center,
+        ),
+        leading: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: isDark ? iconColor.withValues(alpha: 0.16) : bgColor,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(iconData, color: iconColor, size: 24),
+        ),
+        title: Text(
+          file.name,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5),
+        ),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Row(
             children: [
-              _syncStatus(context, file),
-              if (file.syncState == 'uploading')
+              Text(
+                _size(file.size),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  fontSize: 12,
+                ),
+              ),
+              if (file.folderName != null) ...[
                 Text(
-                  _uploadProgress.containsKey(file.id)
-                      ? '${((_uploadProgress[file.id] ?? 0) * 100).round()}%'
-                      : 'Preparing upload…',
+                  ' · ${file.folderName}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                    fontSize: 12,
+                  ),
                 ),
+              ],
+              const Spacer(),
+              _syncStatus(context, file),
             ],
           ),
-          if (file.syncState == 'uploading') ...[
-            const SizedBox(height: 6),
-            LinearProgressIndicator(value: _uploadProgress[file.id]),
+        ),
+        trailing: PopupMenuButton<String>(
+          tooltip: 'File actions',
+          icon: Icon(Icons.more_vert_rounded, color: theme.colorScheme.onSurfaceVariant),
+          onSelected: (value) async {
+            if (value == 'upload') _uploadFile(file);
+            if (value == 'cancel') _cancelUpload(file.id);
+            if (value == 'delete') _delete(file);
+            if (value == 'rename') _rename(file);
+            if (value == 'folder') _moveToFolder(file);
+            if (value == 'resolve') _resolveConflict(file);
+            if (value == 'toggle_hidden' && !widget.isHiddenVault) {
+              await widget.vault.toggleFileHidden(file.id, !file.isHidden);
+              await _reload();
+              if (!file.isHidden && _hasCloudSession) _sync(silent: true);
+            }
+          },
+          itemBuilder: (_) => [
+            if (file.syncState == 'uploading')
+              const PopupMenuItem(
+                value: 'cancel',
+                child: Row(
+                  children: [
+                    Icon(Icons.close_rounded, size: 18),
+                    SizedBox(width: 8),
+                    Text('Cancel upload'),
+                  ],
+                ),
+              )
+            else if (file.syncState != 'synced' && file.syncState != 'conflict')
+              const PopupMenuItem(
+                value: 'upload',
+                child: Row(
+                  children: [
+                    Icon(Icons.cloud_upload_outlined, size: 18),
+                    SizedBox(width: 8),
+                    Text('Sync to cloud'),
+                  ],
+                ),
+              ),
+            const PopupMenuItem(value: 'rename', child: Text('Rename')),
+            const PopupMenuItem(value: 'folder', child: Text('Move to folder')),
+            if (!widget.isHiddenVault)
+              PopupMenuItem(
+                value: 'toggle_hidden',
+                child: Text(
+                  file.isHidden ? 'Move to regular files' : 'Move to Hidden Safe',
+                ),
+              ),
+            if (file.syncState == 'conflict')
+              const PopupMenuItem(
+                value: 'resolve',
+                child: Text('Keep local name on cloud'),
+              ),
+            const PopupMenuItem(
+              value: 'delete',
+              child: Text('Move to Recycle Bin', style: TextStyle(color: Colors.red)),
+            ),
           ],
-        ],
+        ),
       ),
-      trailing: PopupMenuButton<String>(
-        tooltip: 'File actions',
-        onSelected: (value) async {
-          if (value == 'upload') _uploadFile(file);
-          if (value == 'cancel') _cancelUpload(file.id);
-          if (value == 'delete') _delete(file);
-          if (value == 'rename') _rename(file);
-          if (value == 'folder') _moveToFolder(file);
-          if (value == 'resolve') _resolveConflict(file);
-          if (value == 'toggle_hidden' && !widget.isHiddenVault) {
-            await widget.vault.toggleFileHidden(file.id, !file.isHidden);
-            await _reload();
-            if (!file.isHidden && _hasCloudSession) _sync(silent: true);
-          }
-        },
-        itemBuilder: (_) => [
-          if (file.syncState == 'uploading')
-            const PopupMenuItem(
-              value: 'cancel',
-              child: Row(
-                children: [
-                  Icon(Icons.close_rounded, size: 18),
-                  SizedBox(width: 8),
-                  Text('Cancel upload'),
-                ],
-              ),
-            )
-          else if (file.syncState != 'synced' && file.syncState != 'conflict')
-            const PopupMenuItem(
-              value: 'upload',
-              child: Row(
-                children: [
-                  Icon(Icons.cloud_upload_outlined, size: 18),
-                  SizedBox(width: 8),
-                  Text('Retry upload'),
-                ],
-              ),
-            ),
-          const PopupMenuItem(value: 'rename', child: Text('Rename')),
-          const PopupMenuItem(value: 'folder', child: Text('Move to folder')),
-          if (!widget.isHiddenVault)
-            PopupMenuItem(
-              value: 'toggle_hidden',
-              child: Text(
-                file.isHidden ? 'Move to regular files' : 'Move to Hidden Safe',
-              ),
-            ),
-          if (file.syncState == 'conflict')
-            const PopupMenuItem(
-              value: 'resolve',
-              child: Text('Keep local name on cloud'),
-            ),
-          const PopupMenuItem(
-            value: 'delete',
-            child: Text('Move to Recycle Bin'),
-          ),
-        ],
-      ),
-    ),
-  );
+    );
+  }
 
   String _size(int bytes) {
     if (bytes < 1024) return '$bytes B';
@@ -1082,47 +1156,14 @@ class _VaultScreenState extends State<VaultScreen> {
   }
 
   Widget _syncStatus(BuildContext context, VaultFile file) {
-    final (label, icon, color) = switch (file.syncState) {
-      'synced' => ('Synced', Icons.cloud_done_rounded, Colors.green),
-      'uploading' => ('Uploading', Icons.cloud_upload_outlined, Colors.blue),
-      'failed' || 'conflict' => (
-        'Needs attention',
-        Icons.warning_amber_rounded,
-        Colors.orange,
-      ),
-      'queued' || 'rename_pending' when _hasCloudSession => (
-        'Queued',
-        Icons.cloud_queue_rounded,
-        Colors.blueGrey,
-      ),
-      _ => ('On this device', Icons.phone_android_rounded, Colors.blueGrey),
+    final (icon, color) = switch (file.syncState) {
+      'synced' => (Icons.cloud_done_rounded, Colors.green),
+      'uploading' => (Icons.cloud_upload_rounded, Colors.blue),
+      'failed' || 'conflict' => (Icons.warning_amber_rounded, Colors.orange),
+      'queued' || 'rename_pending' when _hasCloudSession => (Icons.cloud_queue_rounded, Colors.blueGrey),
+      _ => (Icons.lock_outline_rounded, Colors.grey),
     };
-    final scheme = Theme.of(context).colorScheme;
-    return Semantics(
-      label: 'Sync status: $label',
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.14),
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 14, color: color),
-            const SizedBox(width: 5),
-            Text(
-              label,
-              style: TextStyle(
-                color: scheme.onSurface,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+    return Icon(icon, size: 16, color: color);
   }
 }
 
